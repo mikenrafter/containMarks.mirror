@@ -1,0 +1,31 @@
+{
+	"name": "Container Bookmarks",
+	"description": "Securely open bookmarks in multi-account containers",
+	"version": "1.0.0",
+	"manifest_version": 2,
+
+	"author": "Mikenrafter",
+	"homepage_url": "https://gitlab.com/mikenrafter/ContainerBookmarks",
+
+	"permissions": [
+		"tabs",
+		"menus",
+		"contextMenus",
+		"bookmarks",
+		"contextualIdentities",
+		"cookies",
+		"storage",
+		"unlimitedStorage",
+		"notifications"
+	],
+
+	"background": {
+		"scripts": ["background.js"]
+	},
+
+	"browser_specific_settings": {
+		"gecko": {
+			"id": "cont@bmarks"
+		}
+	}
+}
