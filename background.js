@@ -173,9 +173,10 @@ function parse(url) {
 }
 
 // given a url, assign a token
-function assign(value, retain) {
+function assign(value, container=null) {
 	// if there's a container, don't assign an ID
-	value.token = value.container === noContainer ? "" : generateKey()
+	value.token = container ||
+		(value.container === noContainer ? "" : generateKey())
 	// url -> prefix:token:url
 	if (value.token) value.url = [prefix, value.token, value.url].join(delim)
 	return value
@@ -240,9 +241,7 @@ async function getContainer(name) {
 	if (name == noContainer || name == undefined || typeof name != "string")
 		return null
 
-	const containers = await browser.contextualIdentities.query({
-		name: name,
-	}).then(x=>x)
+	const containers = await browser.contextualIdentities.query({name}).then(x=>x)
 
 	// debug(containers)
 	if (containers.length >= 1) {
@@ -317,4 +316,22 @@ browser.bookmarks.onRemoved.addListener( async (id, info) => {
 	const item = await lookup(info.node.url)
 	// debug('removed', info.node, item)
 	delete localStorage[item.token]
+});
+
+
+browser.pageAction.onClicked.addListener( async (tab, info) => {
+	try {
+		const container = await browser.contextualIdentities.get(tab.cookieStoreId)
+		const title = tab.title.substr(0,10)
+		const bookmark = await browser.bookmarks.create({
+			parentId: "toolbar_____", index: 0,
+			title, url: tab.url
+		})
+		log(await refresh({...bookmark, container: container.name}))
+		await browser.notifications.create({
+			type: "basic",
+			title: "Bookmark Created",
+			message: `${title} in ${container.name}\n(1st item on your bookmarks bar)`
+		})
+	} catch (e) {log(e)}
 });

@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>README</title>
+  <style>
+    html {
+      line-height: 1.5;
+      font-family: Georgia, serif;
+      font-size: 20px;
+      color: #1a1a1a;
+      background-color: #fdfdfd;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 36em;
+      padding-left: 50px;
+      padding-right: 50px;
+      padding-top: 50px;
+      padding-bottom: 50px;
+      hyphens: auto;
+      word-wrap: break-word;
+      text-rendering: optimizeLegibility;
+      font-kerning: normal;
+    }
+    @media (max-width: 600px) {
+      body {
+        font-size: 0.9em;
+        padding: 1em;
+      }
+    }
+    @media print {
+      body {
+        background-color: transparent;
+        color: black;
+        font-size: 12pt;
+      }
+      p, h2, h3 {
+        orphans: 3;
+        widows: 3;
+      }
+      h2, h3, h4 {
+        page-break-after: avoid;
+      }
+    }
+    p {
+      margin: 1em 0;
+    }
+    a {
+      color: #1a1a1a;
+    }
+    a:visited {
+      color: #1a1a1a;
+    }
+    img {
+      max-width: 100%;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 1.4em;
+    }
+    h5, h6 {
+      font-size: 1em;
+      font-style: italic;
+    }
+    h6 {
+      font-weight: normal;
+    }
+    ol, ul {
+      padding-left: 1.7em;
+      margin-top: 1em;
+    }
+    li > ol, li > ul {
+      margin-top: 0;
+    }
+    blockquote {
+      margin: 1em 0 1em 1.7em;
+      padding-left: 1em;
+      border-left: 2px solid #e6e6e6;
+      color: #606060;
+    }
+    code {
+      font-family: Menlo, Monaco, 'Lucida Console', Consolas, monospace;
+      font-size: 85%;
+      margin: 0;
+    }
+    pre {
+      margin: 1em 0;
+      overflow: auto;
+    }
+    pre code {
+      padding: 0;
+      overflow: visible;
+    }
+    .sourceCode {
+     background-color: transparent;
+     overflow: visible;
+    }
+    hr {
+      background-color: #1a1a1a;
+      border: none;
+      height: 1px;
+      margin: 1em 0;
+    }
+    table {
+      margin: 1em 0;
+      border-collapse: collapse;
+      width: 100%;
+      overflow-x: auto;
+      display: block;
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    table caption {
+      margin-bottom: 0.75em;
+    }
+    tbody {
+      margin-top: 0.5em;
+      border-top: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    th {
+      border-top: 1px solid #1a1a1a;
+      padding: 0.25em 0.5em 0.25em 0.5em;
+    }
+    td {
+      padding: 0.125em 0.5em 0.25em 0.5em;
+    }
+    header {
+      margin-bottom: 4em;
+      text-align: center;
+    }
+    #TOC li {
+      list-style: none;
+    }
+    #TOC a:not(:hover) {
+      text-decoration: none;
+    }
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    span.underline{text-decoration: underline;}
+    div.column{display: inline-block; vertical-align: top; width: 50%;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    ul.task-list{list-style: none;}
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+  <!--[if lt IE 9]>
+    <script src="//cdnjs.cloudflare.com/ajax/libs/html5shiv/3.7.3/html5shiv-printshiv.min.js"></script>
+  <![endif]-->
+</head>
+<body>
+<h1 id="containermarks">ContainerMarks</h1>
+<p>Firefox extension that allows you to <strong>securely</strong> open bookmarks in multi-account containers.</p>
+<hr />
+<h2 id="usage">Usage</h2>
+<p>Access from the omnibar:<br />
+<img src="./usage-omnibar.png" alt="Omnibar usage example" /></p>
+<p>Access from the bookmark-bar context-menu:<br />
+<img src="./usage-context.png" alt="Context menu usage example" /></p>
+<p>Applying this operation to the contents of entire folders is also supported.</p>
+<hr />
+<h2 id="security-tokens">Security Tokens</h2>
+<p>When a bookmark is assigned to a container, it’s assigned a random token.<br />
+It’s prepended to the existing URL, as well as the prefix <code>about</code>.<br />
+E.G. <code>https://example.com</code> -&gt; <code>about:r4nD0Mt_k3n:https://example.com</code></p>
+<h2 id="token-retention-policy">Token retention Policy</h2>
+<p>Tokens are refreshed upon these conditions</p>
+<ul>
+<li><p>When the browser restarts</p></li>
+<li><p>When the bookmark’s used</p></li>
+<li><p>When a security breach is attempted</p>
+<ul>
+<li>If a valid token is used, but the URLs don’t align… The user is alerted. In addition to URL refreshment.</li>
+</ul></li>
+</ul>
+<p>Unused or invalid tokens are deleted upon these conditions</p>
+<ul>
+<li><p>When the browser restarts</p></li>
+<li><p>After the token in question has been refreshed</p></li>
+<li><p>After bookmark deletion</p></li>
+<li><p>After a bookmark is unassigned</p></li>
+</ul>
+<h2 id="privacy-policyt.o.sc.o.c">Privacy Policy/T.O.S/C.O.C</h2>
+<ol type="1">
+<li>We do not collect ANY information from you, everything is stored locally.<br />
+</li>
+<li>There are no terms of service, use as you please. Do respect the <a href="./LICENSE">License</a> file, however.</li>
+<li>Don’t be a dick. It’s that simple.</li>
+</ol>
+<h2 id="made-with-components-from">Made with components from</h2>
+<ul>
+<li><a href="https://addons.mozilla.org/en-US/firefox/addon/container_bookmarks/"><em>Container Bookmarks</em> on the Mozilla-Addons-Store</a></li>
+<li><a href="https://addons.mozilla.org/firefox/addon/open-url-in-container/"><em>Open URL In Container</em> on the Mozilla-Addons-Store</a></li>
+</ul>
+<h2 id="license">License</h2>
+<p>All code is licensed under the MIT License.<br />
+Because innovation is desirable.</p>
+<h2 id="contributing">Contributing</h2>
+<p>Do it. If it’s needed, contribute. I’ll accept any Pull/Merge request, so long as it’s reasonable, and decently tested.</p>
+</body>
+</html>

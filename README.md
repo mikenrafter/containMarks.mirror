@@ -5,6 +5,18 @@ multi-account containers.
 
 ---
 
+## Usage
+
+Access from the omnibar:  
+![Omnibar usage example](./usage-omnibar.png)
+
+Access from the bookmark-bar context-menu:  
+![Context menu usage example](./usage-context.png)
+
+Applying this operation to the contents of entire folders is also supported.
+
+---
+
 ## Security Tokens
 
 When a bookmark is assigned to a container, it's assigned a random token.  

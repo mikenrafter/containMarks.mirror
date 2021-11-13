@@ -24,8 +24,23 @@
 	},
 
 	"icons": {
-		"48": "icon.svg",
-		"96": "icon.svg"
+		"19":  "icons/icon.svg",
+		"32":  "icons/icon.svg",
+		"48":  "icons/icon.svg",
+		"96":  "icons/icon.svg",
+		"128": "icons/icon.svg"
+	},
+	
+	"page_action": {
+		"default_icon": {
+			"19":  "icons/icon-min.svg",
+			"32":  "icons/icon-min.svg",
+			"48":  "icons/icon-min.svg",
+			"96":  "icons/icon-min.svg",
+			"128": "icons/icon-min.svg"
+		},
+		"default_title": "Bookmark this URL inside this container.",
+		"show_matches": ["<all_urls>"]
 	},
 
 	"browser_specific_settings": {
