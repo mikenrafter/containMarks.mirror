@@ -3,17 +3,17 @@
 Firefox extension that allows you to **securely** open bookmarks in
 multi-account containers.
 
-Get it [here!](https://addons.mozilla.org/en-US/firefox/addon/containmarks/)
+Get it [here! ![Two bookmarks, the addon's icon](./src/icons/icon.svg)](https://addons.mozilla.org/en-US/firefox/addon/containmarks/)
 
 ---
 
 ## Usage
 
 Access from the omnibar:  
-![Omnibar usage example](./usage-omnibar.png)
+![Omnibar usage example](./product-page/usage-omnibar.png)
 
 Access from the bookmark-bar context-menu:  
-![Context menu usage example](./usage-context.png)
+![Context menu usage example](./product-page/usage-context.png)
 
 Applying this operation to the contents of entire folders is also supported.
 
