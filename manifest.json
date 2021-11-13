@@ -45,7 +45,7 @@
 
 	"browser_specific_settings": {
 		"gecko": {
-			"id": "bookmarks@container"
+			"id": "cont@bmarks"
 		}
 	}
 }
