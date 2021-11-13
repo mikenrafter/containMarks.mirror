@@ -3,6 +3,8 @@
 Firefox extension that allows you to **securely** open bookmarks in
 multi-account containers.
 
+Get it [here!](https://addons.mozilla.org/en-US/firefox/addon/containmarks/)
+
 ---
 
 ## Usage
