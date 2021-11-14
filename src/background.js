@@ -79,10 +79,15 @@ catch (e) {debug(e)}
 	
 	// Creates menu items when called
 	function createMenuItems(bookmark={type:"",id:""}) {
+		let main_message = ["Assign",
+			bookmark.type === "folder"
+				? ("Bookmarks in " + (bookmark.id === "toolbar_____" ? "Toolbar" : "Folder"))
+				: "Bookmark",
+			"to container"]
 		// Main menu items
 		browser.menus.create({
 			id: "assign_container",
-			title: `Assign ${bookmark.type === "folder" ? "Bookmarks in " + (bookmark.id === "toolbar_____" ? "Toolbar" : "Folder") : "Bookmark"} to container`,
+			title: main_message.join(' '),
 			contexts: ["bookmark"],
 		})
 		// Submenu items for assign_container
@@ -116,21 +121,21 @@ catch (e) {debug(e)}
 	
 	// Remove menu if shown from toolbar
 	browser.menus.onShown.addListener(async (info) => {
-		if (info.contexts.includes("bookmark")) {
-			// if (info.bookmarkId == "toolbar_____") {
-			// 	if (itemsExist) {
-			// 		browser.menus.removeAll()
-			// 		browser.menus.refresh()
-			// 		itemsExist = false
-			// 		return
-			// 	}
-			// } else {
-				const bookmarks = await browser.bookmarks.get(info.bookmarkId)
+		try {
+			if (itemsExist) {
 				browser.menus.removeAll()
-				createMenuItems(bookmarks[0])
+				itemsExist = false
+			}
+			if (info.contexts.includes("bookmark")) {
+				const bookmark = await browser.bookmarks.get(info.bookmarkId)
+				if (bookmark[0].type == "separator") {
+					browser.menus.refresh()
+					return
+				}
+				createMenuItems(bookmark[0])
 				itemsExist = true
-			// }
-		}
+			}
+		} catch (e) {debug(e)}
 	})
 }
 let itemsExist = true
