@@ -78,11 +78,11 @@ catch (e) {debug(e)}
 	})
 	
 	// Creates menu items when called
-	function createMenuItems(bookmarkType) {
+	function createMenuItems(bookmark={type:"",id:""}) {
 		// Main menu items
 		browser.menus.create({
 			id: "assign_container",
-			title: `Assign ${bookmarkType === "folder" ? "Bookmarks in Folder" : "Bookmark"} to container`,
+			title: `Assign ${bookmark.type === "folder" ? "Bookmarks in " + (bookmark.id === "toolbar_____" ? "Toolbar" : "Folder") : "Bookmark"} to container`,
 			contexts: ["bookmark"],
 		})
 		// Submenu items for assign_container
@@ -117,19 +117,19 @@ catch (e) {debug(e)}
 	// Remove menu if shown from toolbar
 	browser.menus.onShown.addListener(async (info) => {
 		if (info.contexts.includes("bookmark")) {
-			if (info.bookmarkId == "toolbar_____") {
-				if (itemsExist) {
-					browser.menus.removeAll()
-					browser.menus.refresh()
-					itemsExist = false
-					return
-				}
-			} else {
+			// if (info.bookmarkId == "toolbar_____") {
+			// 	if (itemsExist) {
+			// 		browser.menus.removeAll()
+			// 		browser.menus.refresh()
+			// 		itemsExist = false
+			// 		return
+			// 	}
+			// } else {
 				const bookmarks = await browser.bookmarks.get(info.bookmarkId)
 				browser.menus.removeAll()
-				createMenuItems(bookmarks[0].type)
+				createMenuItems(bookmarks[0])
 				itemsExist = true
-			}
+			// }
 		}
 	})
 }
@@ -199,20 +199,21 @@ async function lookup(url, id=0) {
 }
 
 async function refresh(bookmark) {
-	const reference = await lookup(bookmark.url, bookmark.id)
-	const container = bookmark.container || reference.container
-	const bmark = assign({...reference, container})
-	debug('refresh:', bookmark, reference, bmark)
-	
-	// update DB
-	if (bmark.token)
-		localStorage[bmark.token] = JSON.stringify({id: bmark.id, container})
-	//if (!container)
-	delete localStorage[bookmark.old_token || bmark.old_token]
+	try {
+		const reference = await lookup(bookmark.url, bookmark.id)
+		const container = bookmark.container || reference.container
+		const bmark = assign({...reference, container})
+		debug('refresh:', bookmark, reference, bmark)
+		
+		// update DB
+		if (bmark.token)
+			localStorage[bmark.token] = JSON.stringify({id: bmark.id, container})
+		delete localStorage[bookmark.old_token || bmark.old_token]
 
-	// update bookmark
-	await browser.bookmarks.update(bmark.id, {url: bmark.url})
-	return bmark
+		// update bookmark
+		await browser.bookmarks.update(bmark.id, {url: bmark.url})
+		return bmark
+	} catch(e) {debug(e)}
 }
 
 // Update bookmark url with selected container
@@ -224,10 +225,15 @@ async function update(bookmark, container) {
 
 async function apply(bookmarks, item) {
 	debug('apply', bookmarks, item)
-	if (bookmarks[0].type === "folder") {
-		bookmarks = await browser.bookmarks.getChildren(bookmarks[0].id)
+	for (index in bookmarks) {
+		if (bookmarks[index].id == "separator") continue
+		try {
+			if (bookmarks[index].type == "folder")
+				await apply(await browser.bookmarks.getChildren(bookmarks[index].id), item)
+			else
+				await update(bookmarks[index], item)
+		} catch (e) {debug(e)}
 	}
-	for (index in bookmarks) await update(bookmarks[index], item)
 	// debug('updated:', bookmarks)
 }
 
