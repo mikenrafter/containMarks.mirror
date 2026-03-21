@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>ContainMarks Settings</title>
+		<style>
+			:root {
+				font-family: system-ui, sans-serif;
+			}
+			body {
+				margin: 0;
+				padding: 20px;
+				background: #f7f7f9;
+				color: #1f2328;
+			}
+			main {
+				max-width: 720px;
+				margin: 0 auto;
+				background: white;
+				padding: 20px;
+				border: 1px solid #e1e4e8;
+				border-radius: 10px;
+			}
+			fieldset {
+				border: 1px solid #e1e4e8;
+				border-radius: 8px;
+				margin-bottom: 16px;
+				padding: 14px;
+			}
+			label {
+				display: block;
+				margin-bottom: 10px;
+			}
+			select,
+			button {
+				font: inherit;
+			}
+			button {
+				padding: 8px 14px;
+				border-radius: 8px;
+				border: 1px solid #d0d7de;
+				background: #f6f8fa;
+				cursor: pointer;
+			}
+			#save-status {
+				min-height: 20px;
+			}
+		</style>
+	</head>
+	<body>
+		<main>
+			<h1>ContainMarks Settings</h1>
+			<form id="options-form">
+				<fieldset>
+					<legend>Bookmark Target</legend>
+					<label for="target-folder">Target folder for page-action bookmark creation</label>
+					<select id="target-folder" required></select>
+				</fieldset>
+
+				<fieldset>
+					<legend>Token Retention Policies</legend>
+					<label>
+						<input type="checkbox" id="ack-risks" />
+						I understand the <a id="risk-link" target="_blank" rel="noopener noreferrer">risks</a>.
+					</label>
+					<label>
+						<input type="checkbox" id="reset-tokens-on-startup" />
+						Reset tokens on startup
+					</label>
+					<label>
+						<input type="checkbox" id="regenerate-token-on-use" checked />
+						Regenerate token on every use
+					</label>
+				</fieldset>
+
+				<button type="submit">Save Settings</button>
+				<p id="save-status" aria-live="polite"></p>
+			</form>
+		</main>
+		<script src="options.js"></script>
+	</body>
+</html>
