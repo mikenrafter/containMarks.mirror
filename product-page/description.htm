@@ -1,49 +1,91 @@
-A Firefox extension that allows you to <strong>securely</strong> open bookmarks in multi-account containers.
+<h1>
+	Usage <img src="https://gitlab.com/mikenrafter/containMarks/-/raw/main/src/icons/icon.svg" width="200" height="200" alt="A bookmark embedded in a star, the addon's icon."/>
+</h1>
 
-See screenshots for usage instructions
-* Assigning containers to the contents of entire folders is also supported.
+<p>Natively and easily edit and open bookmarks in multi-account containers.</p>
 
-Security Tokens
-When a bookmark is assigned to a container, it’s assigned a random token.
-It’s prepended to the existing URL, as well as the prefix <code>about</code>.
-E.G. <code>https://example.com</code> -&gt; <code>about:r4nD0Mt_k3n:https://example.com</code>
+<hr />
 
-Token retention Policy
-Tokens are refreshed upon these conditions
-<ul>
-<li>When the browser restarts</li>
-<li>When the bookmark’s used</li>
-<li>When a security breach is attempted
-<ul>
-<li>If a valid token is used, but the URLs don’t align… The user is alerted. In addition to URL refreshment.</li>
-</ul></li>
-</ul>
+<h2>Usage</h2>
 
-Unused or invalid tokens are deleted upon these conditions
-<ul>
-<li>When the browser restarts</li>
-<li>After the token in question has been refreshed</li>
-<li>After bookmark deletion</li>
-<li>After a bookmark is unassigned</li>
-</ul>
+<p>Quickly bookmark the current page + container combo:</p>
+<p><img src="https://gitlab.com/mikenrafter/containMarks/-/raw/main/product-page/usage-omnibar.gif" alt="Omnibar usage example" /></p>
 
-Privacy Policy/T.O.S
-<ol type="1">
-<li>We do not collect ANY information from you, everything is stored locally.
-</li>
-<li>There are no terms of service, use as you please. Do respect the MIT License, however.</li>
+<p>Assign a container from the bookmark context menu:</p>
+<p><img src="https://gitlab.com/mikenrafter/containMarks/-/raw/main/product-page/usage-context.png" alt="Context menu usage example" /></p>
+
+<p>Easily edit assigned bookmarks with the native bookmark UI:</p>
+<p><img src="https://gitlab.com/mikenrafter/containMarks/-/raw/main/product-page/usage-edit.gif" alt="Edit usage example" /></p>
+
+<p>Assign whole folders in one pass:</p>
+<p><img src="https://gitlab.com/mikenrafter/containMarks/-/raw/main/product-page/usage-folder.gif" alt="Folder assignment usage example" /></p>
+
+<p>Choose where quick bookmarks are saved from the options page:</p>
+<p><img src="https://gitlab.com/mikenrafter/containMarks/-/raw/main/product-page/usage-target.png" alt="Set target folder" /></p>
+
+<hr />
+
+<h2>Security</h2>
+
+<p>
+	ContainMarks prefixes a one-time code (a token) to all assigned bookmarks. This ensures only bookmarked pairings open in the assigned container.<br />
+	If you experience any issues with stale tokens, the extension preferences page (<a href="#token-retention-options">read more below</a>) may be able to help.
+</p>
+
+<h2>Sync</h2>
+
+<p>ContainMarks now works with Firefox Sync / bookmark transfer methods.</p>
+
+<h2>Privacy Policy/T.O.S/C.O.C</h2>
+
+<ol>
+	<li>We do not collect ANY information from you, everything is stored locally.</li>
+	<li>There are no terms of service, use as you please. Do respect the MIT License, however.</li>
+	<li>Be kind to others. This rule will be enforced by owner of this repository, at their discretion.</li>
 </ol>
 
-Made with components from
+<hr />
+
+<h1>Slightly more technical details</h1>
+
+<h2>Security Tokens</h2>
+
+<p>
+	When a bookmark is assigned to a container, it's assigned a random token.<br />
+	It's prepended to the existing URL, as well as the prefix <code>about</code>.<br />
+	E.G. <code>https://example.com</code> -&gt; <code>about:r4nD0Mt_k3n:4:https://example.com</code>
+</p>
+
+<p>The middle number is the stable, first-seen container mapping index.</p>
+
+<h2>Sync Mapping Folder</h2>
+
+<p>ContainMarks stores container mapping bookmarks in the Bookmarks Menu under <code>ContainMarks Sync</code>.</p>
+
 <ul>
-<li><a href="https://addons.mozilla.org/en-US/firefox/addon/container_bookmarks/"><em>Container Bookmarks</em> on the Mozilla-Addons-Store</a></li>
-<li><a href="https://addons.mozilla.org/firefox/addon/open-url-in-container/"><em>Open URL In Container</em> on the Mozilla-Addons-Store</a></li>
+	<li>Folder location: <code>Bookmarks Menu</code> (<code>menu________</code>)</li>
+	<li>Mapping bookmark title: <code>Mapping: {containerName}</code></li>
+	<li>Mapping bookmark URL: <code>about:{firstSeenIndex}:{cookieStoreId}:{backupName}</code></li>
 </ul>
 
-License
-All code is licensed under the MIT License.
-Because innovation is desirable.
+<p>This keeps container references stable across renames and helps sync behavior across devices.</p>
 
-Contributing
-Do it. If it’s needed, contribute. I’ll accept any Pull/Merge request, so long as it’s reasonable, and decently tested.
-See our homepage for source code and contribution.
+<h2 id="token-retention-options">Token Retention Options</h2>
+
+<p>Token retention behavior is configurable in the options page:</p>
+
+<ul>
+	<li><code>Regenerate tokens on startup</code> toggle</li>
+	<li><code>Regenerate tokens on every use</code> toggle</li>
+</ul>
+
+<h2>Made with ideas from</h2>
+
+<ul>
+	<li><a href="https://addons.mozilla.org/en-US/firefox/addon/container_bookmarks/"><em>Container Bookmarks</em> on the Mozilla-Addons-Store</a></li>
+	<li><a href="https://addons.mozilla.org/firefox/addon/open-url-in-container/"><em>Open URL In Container</em> on the Mozilla-Addons-Store</a></li>
+</ul>
+
+<h1>License</h1>
+
+<p>All code is licensed under the MIT License.<br />Because innovation is desirable.</p>
