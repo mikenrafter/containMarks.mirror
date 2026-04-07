@@ -31,6 +31,8 @@ export interface ContainMarksSettings {
 	resetTokensOnStartup: boolean
 	regenerateTokenOnEveryUse: boolean
 	acknowledgeRiskyTokenBehavior: boolean
+	showPageActionButton: boolean
+	enableBookmarkSync: boolean
 }
 
 export interface ContainerMappingRecord {
@@ -142,6 +144,7 @@ export interface TabsApi {
 	TAB_ID_NONE: number
 	create(details: { cookieStoreId: string; url: string; index: number }): Promise<void>
 	remove(tabId: number): Promise<void>
+	query(queryInfo: Record<string, never>): Promise<Tab[]>
 	highlight(details: { populate: boolean; tabs: number[] }): Promise<void>
 	onUpdated: {
 		addListener(listener: (id: number, changeInfo: TabChangeInfo, tab: Tab) => void | Promise<void>): void
@@ -153,6 +156,8 @@ export interface NotificationsApi {
 }
 
 export interface PageActionApi {
+	show(tabId: number): Promise<void>
+	hide(tabId: number): Promise<void>
 	onClicked: {
 		addListener(listener: (tab: Tab) => void | Promise<void>): void
 	}

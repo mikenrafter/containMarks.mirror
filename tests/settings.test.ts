@@ -23,7 +23,9 @@ describe('settings helpers', () => {
 			targetFolderId: 'menu________',
 			resetTokensOnStartup: false,
 			regenerateTokenOnEveryUse: false,
-			acknowledgeRiskyTokenBehavior: false
+			acknowledgeRiskyTokenBehavior: false,
+			showPageActionButton: true,
+			enableBookmarkSync: true
 		})
 	})
 
@@ -32,14 +34,18 @@ describe('settings helpers', () => {
 			targetFolderId: 'menu________',
 			resetTokensOnStartup: true,
 			regenerateTokenOnEveryUse: false,
-			acknowledgeRiskyTokenBehavior: false
+			acknowledgeRiskyTokenBehavior: false,
+			showPageActionButton: true,
+			enableBookmarkSync: true
 		})
 
 		expect(validated).toEqual({
 			targetFolderId: 'menu________',
 			resetTokensOnStartup: false,
 			regenerateTokenOnEveryUse: true,
-			acknowledgeRiskyTokenBehavior: false
+			acknowledgeRiskyTokenBehavior: false,
+			showPageActionButton: true,
+			enableBookmarkSync: true
 		})
 	})
 
@@ -48,14 +54,18 @@ describe('settings helpers', () => {
 			targetFolderId: 'toolbar_____',
 			resetTokensOnStartup: false,
 			regenerateTokenOnEveryUse: true,
-			acknowledgeRiskyTokenBehavior: false
+			acknowledgeRiskyTokenBehavior: false,
+			showPageActionButton: true,
+			enableBookmarkSync: true
 		})).toBe(false)
 
 		expect(hasRiskyTokenBehavior({
 			targetFolderId: 'toolbar_____',
 			resetTokensOnStartup: true,
 			regenerateTokenOnEveryUse: true,
-			acknowledgeRiskyTokenBehavior: true
+			acknowledgeRiskyTokenBehavior: true,
+			showPageActionButton: true,
+			enableBookmarkSync: true
 		})).toBe(true)
 	})
 })

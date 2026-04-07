@@ -42,7 +42,8 @@ export class BackgroundApp {
 	private get settings(): Promise<ContainMarksSettings> {
 		return loadSettings(this.browserApi)
 	}
-	private readonly mappingStore: ContainerMappingStore
+	private readonly syncMappingStore: ContainerMappingStore
+	private readonly localMappingStore: ContainerMappingStore
 
 	public constructor(
 		private readonly browserApi: BrowserApi,
@@ -50,7 +51,8 @@ export class BackgroundApp {
 		private readonly logger: LoggerLike = console,
 		private readonly randomValue: () => number = Math.random
 	) {
-		this.mappingStore = new ContainerMappingStore(this.browserApi, this.logger)
+		this.syncMappingStore = new ContainerMappingStore(this.browserApi, this.logger, { enableBookmarkSync: true })
+		this.localMappingStore = new ContainerMappingStore(this.browserApi, this.logger, { enableBookmarkSync: false })
 	}
 
 	public debug(...args: unknown[]): void {
@@ -74,15 +76,17 @@ export class BackgroundApp {
 
 	public async startup(): Promise<void> {
 		const settings = await this.settings
-		await this.mappingStore.initialize()
-		await this.migrateLegacyStorage()
+		const mappingStore = this.getMappingStore(settings)
+		await mappingStore.initialize()
+		await this.migrateLegacyStorage(mappingStore)
+		await this.syncPageActionVisibilityForAllTabs(settings)
 
 		if (settings.resetTokensOnStartup) {
-			await this.refreshTokensOnStartup()
+			await this.refreshTokensOnStartup(mappingStore)
 		}
 	}
 
-	private async migrateLegacyStorage(): Promise<void> {
+	private async migrateLegacyStorage(mappingStore: ContainerMappingStore): Promise<void> {
 		for (const key of listStorageKeys(this.storage)) {
 			const reference = readLegacyReference(this.storage, key)
 			if (!reference || !reference?.backupName) continue;
@@ -90,7 +94,7 @@ export class BackgroundApp {
 
 			const identity = await this.getContainer({ backupName: reference.backupName })
 			if (!identity) continue;
-			const mapping = await this.mappingStore.ensureMappingForContainer(identity)
+			const mapping = await mappingStore.ensureMappingForContainer(identity)
 			if (!mapping) continue;
 
 			try {
@@ -114,19 +118,42 @@ export class BackgroundApp {
 		}
 	}
 
-	private async refreshTokensOnStartup(): Promise<void> {
+	private async refreshTokensOnStartup(mappingStore: ContainerMappingStore): Promise<void> {
 		const bookmarks = await this.browserApi.bookmarks.search({ query: `${PREFIX}${DELIMITER}` })
 		for (const bookmark of bookmarks) {
 			const parsed = parseBookmarkUrl(bookmark)
 			if (!parsed || !parsed.token || parsed.containerIndex === null) {
 				continue
 			}
-			const mapping = this.mappingStore.getByIndex(parsed.containerIndex)
+			const mapping = mappingStore.getByIndex(parsed.containerIndex)
 			if (!mapping) {
 				continue
 			}
 			await this.ensureBookmarkContainerUrl(bookmark)
 		}
+	}
+
+	private getMappingStore(settings: ContainMarksSettings): ContainerMappingStore {
+		return settings.enableBookmarkSync ? this.syncMappingStore : this.localMappingStore
+	}
+
+	private async syncPageActionVisibilityForAllTabs(settings: ContainMarksSettings): Promise<void> {
+		const tabs = await this.browserApi.tabs.query({})
+		for (const tab of tabs) {
+			if (tab.id !== undefined) {
+				await this.syncPageActionVisibilityForTab(tab.id, settings)
+			}
+		}
+	}
+
+	private async syncPageActionVisibilityForTab(tabId: number, settings?: ContainMarksSettings): Promise<void> {
+		const activeSettings = settings ?? await this.settings
+		if (activeSettings.showPageActionButton) {
+			await this.browserApi.pageAction.show(tabId)
+			return
+		}
+
+		await this.browserApi.pageAction.hide(tabId)
 	}
 
 	private async rebuildMenuItems(bookmark: Pick<BookmarkNode, 'type' | 'id'> = { type: '', id: '' }): Promise<void> {
@@ -144,13 +171,15 @@ export class BackgroundApp {
 			return null
 		}
 
-		await this.mappingStore.initialize()
+		const settings = await this.settings
+		const mappingStore = this.getMappingStore(settings)
+		await mappingStore.initialize()
 		const parsed = parseBookmarkUrl(bookmark.url ?? '')
 		if (!parsed || parsed.containerIndex === null) {
 			return NO_CONTAINER
 		}
 
-		const mapping = this.mappingStore.getByIndex(parsed.containerIndex)
+		const mapping = mappingStore.getByIndex(parsed.containerIndex)
 		if (!mapping) {
 			return NO_CONTAINER
 		}
@@ -250,6 +279,9 @@ export class BackgroundApp {
 			return null
 		}
 
+		const settings = await this.settings
+		const mappingStore = this.getMappingStore(settings)
+
 		const parsed = parseBookmarkUrl(bookmark.url ?? '')
 		if (!parsed) return null;
 		this.debug('assign:', bookmark, cookieStoreId, parsed);
@@ -264,9 +296,9 @@ export class BackgroundApp {
 				if (!container) {
 					return null
 				}
-				mapping = await this.mappingStore.ensureMappingForContainer(container)
+				mapping = await mappingStore.ensureMappingForContainer(container)
 			} else {
-				mapping = this.mappingStore.getByIndex(parsed.containerIndex)
+				mapping = mappingStore.getByIndex(parsed.containerIndex)
 			}
 			const index = mapping?.firstSeenIndex ?? null
 
@@ -356,12 +388,18 @@ export class BackgroundApp {
 	}
 
 	public readonly handleTabUpdated = async (id: number, change: TabChangeInfo, tab: Tab): Promise<void> => {
+		if (change.status === 'complete' && id !== this.browserApi.tabs.TAB_ID_NONE) {
+			await this.syncPageActionVisibilityForTab(id)
+		}
+
 		const currentUrl = tab.url ?? change.url ?? ''
 		if (change.status !== 'complete' || id === this.browserApi.tabs.TAB_ID_NONE || !isPrefixedUrl(currentUrl)) {
 			return;
 		}
 
 		const settings = await this.settings;
+		const mappingStore = this.getMappingStore(settings)
+		await mappingStore.initialize()
 		const bookmarks = await this.browserApi.bookmarks.search(currentUrl);
 		const bookmark = bookmarks.find((item) => item.type === 'bookmark' && item.url === currentUrl);
 		if (!bookmark?.id) {
@@ -373,7 +411,7 @@ export class BackgroundApp {
 			return
 		}
 
-		const mapping = this.mappingStore.getByIndex(parsed.containerIndex)
+		const mapping = mappingStore.getByIndex(parsed.containerIndex)
 		if (!mapping) {
 			this.debug('missing mapping for bookmark', bookmark.id, parsed.containerIndex)
 			return
@@ -400,12 +438,16 @@ export class BackgroundApp {
 			}
 
 			const settings = await this.settings
+			if (!settings.showPageActionButton) {
+				return
+			}
+			const mappingStore = this.getMappingStore(settings)
 
 			let assignedCookieStoreId: string | null = null
 			let containerLabel = 'No Container'
 			const container = await this.getContainer({ cookieStoreId: tab.cookieStoreId ?? null })
 			if (container) {
-				await this.mappingStore.ensureMappingForContainer(container)
+				await mappingStore.ensureMappingForContainer(container)
 				assignedCookieStoreId = container.cookieStoreId
 				containerLabel = container.name
 			}

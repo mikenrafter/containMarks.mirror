@@ -52,12 +52,16 @@ function readFormValues(): ContainMarksSettings {
 	const resetTokensOnStartup = getElementById<HTMLInputElement>('reset-tokens-on-startup').checked
 	const regenerateTokenOnEveryUse = getElementById<HTMLInputElement>('regenerate-token-on-use').checked
 	const acknowledgeRiskyTokenBehavior = getElementById<HTMLInputElement>('ack-risks').checked
+	const showPageActionButton = getElementById<HTMLInputElement>('show-page-action-button').checked
+	const enableBookmarkSync = getElementById<HTMLInputElement>('enable-bookmark-sync').checked
 
 	return {
 		targetFolderId: folderSelect.value || DEFAULT_SETTINGS.targetFolderId,
 		resetTokensOnStartup,
 		regenerateTokenOnEveryUse,
-		acknowledgeRiskyTokenBehavior
+		acknowledgeRiskyTokenBehavior,
+		showPageActionButton,
+		enableBookmarkSync
 	}
 }
 
@@ -66,6 +70,8 @@ function writeFormValues(settings: ContainMarksSettings): void {
 	getElementById<HTMLInputElement>('reset-tokens-on-startup').checked = settings.resetTokensOnStartup
 	getElementById<HTMLInputElement>('regenerate-token-on-use').checked = settings.regenerateTokenOnEveryUse
 	getElementById<HTMLInputElement>('ack-risks').checked = settings.acknowledgeRiskyTokenBehavior
+	getElementById<HTMLInputElement>('show-page-action-button').checked = settings.showPageActionButton
+	getElementById<HTMLInputElement>('enable-bookmark-sync').checked = settings.enableBookmarkSync
 }
 
 function setStatus(message: string, isError = false): void {

@@ -90,6 +90,7 @@ function createMappingStoreBrowserMock(options?: {
 			TAB_ID_NONE: -1,
 			create: vi.fn().mockResolvedValue(undefined),
 			remove: vi.fn().mockResolvedValue(undefined),
+			query: vi.fn().mockResolvedValue([]),
 			highlight: vi.fn().mockResolvedValue(undefined),
 			onUpdated: { addListener: vi.fn() }
 		},
@@ -97,6 +98,8 @@ function createMappingStoreBrowserMock(options?: {
 			create: vi.fn().mockResolvedValue('notification-id')
 		},
 		pageAction: {
+			show: vi.fn().mockResolvedValue(undefined),
+			hide: vi.fn().mockResolvedValue(undefined),
 			onClicked: { addListener: vi.fn() }
 		},
 		storage: {
@@ -188,6 +191,25 @@ describe('ContainerMappingStore', () => {
 		expect(browserApi.bookmarks.update).toHaveBeenCalledWith(
 			'mapping-1',
 			expect.objectContaining({ url: 'about:0:cid-new:Work' })
+		)
+	})
+
+	it('stores mappings in local storage when bookmark sync is disabled', async () => {
+		const browserApi = createMappingStoreBrowserMock({ syncFolderExists: false })
+		const store = new ContainerMappingStore(browserApi, console, { enableBookmarkSync: false })
+
+		const record = await store.ensureMappingForContainer(createContextualIdentity('Work', 'cid-1'))
+
+		expect(record).toEqual({ firstSeenIndex: 0, cookieStoreId: 'cid-1', backupName: 'Work' })
+		expect(browserApi.bookmarks.create).not.toHaveBeenCalledWith(
+			expect.objectContaining({ type: 'folder', title: SYNC_FOLDER_TITLE })
+		)
+		expect(browserApi.storage.local.set).toHaveBeenCalledWith(
+			expect.objectContaining({
+				'containMarks.localMappings': [
+					{ firstSeenIndex: 0, cookieStoreId: 'cid-1', backupName: 'Work' }
+				]
+			})
 		)
 	})
 })

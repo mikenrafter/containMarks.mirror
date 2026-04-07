@@ -7,6 +7,12 @@ import {
 } from './containerMappings'
 import type { BookmarkNode, BrowserApi, ContainerMappingRecord, ContextualIdentity, LoggerLike } from './models'
 
+const LOCAL_MAPPING_STORAGE_KEY = 'containMarks.localMappings'
+
+interface ContainerMappingStoreOptions {
+	enableBookmarkSync: boolean
+}
+
 /**
  * Maintains a stable mapping between runtime container identities and sync-safe first-seen indexes.
  *
@@ -21,16 +27,27 @@ export class ContainerMappingStore {
 	private lastAssignedIndex = -1
 	private syncFolderId: string | null = null
 	private loaded = false
+	private readonly enableBookmarkSync: boolean
 
 	public constructor(
 		private readonly browserApi: BrowserApi,
-		private readonly logger: LoggerLike = console
-	) {}
+		private readonly logger: LoggerLike = console,
+		options: ContainerMappingStoreOptions = { enableBookmarkSync: true }
+	) {
+		this.enableBookmarkSync = options.enableBookmarkSync
+	}
 
 	public async initialize(): Promise<void> {
 		if (this.loaded) {
 			return
 		}
+
+		if (!this.enableBookmarkSync) {
+			await this.loadLocalMappings()
+			this.loaded = true
+			return
+		}
+
 		const folder = await this.findSyncFolder()
 		if (!folder) {
 			this.loaded = true
@@ -57,7 +74,11 @@ export class ContainerMappingStore {
 
 		let resolved = await this.tryResolveMapping(identity)
 		if (!resolved) {
-			await this.refreshRecordsFromFolderForWrite()
+			if (this.enableBookmarkSync) {
+				await this.refreshRecordsFromFolderForWrite()
+			} else {
+				await this.loadLocalMappings()
+			}
 			resolved = await this.tryResolveMapping(identity)
 		}
 		if (resolved) return resolved
@@ -122,6 +143,12 @@ export class ContainerMappingStore {
 	}
 
 	private async persistMappingRecord(record: ContainerMappingRecord): Promise<void> {
+		if (!this.enableBookmarkSync) {
+			this.rememberRecord(record)
+			await this.persistLocalMappings()
+			return
+		}
+
 		const folderId = await this.ensureSyncFolderId()
 		const existing = await this.findMappingBookmark(folderId, record.firstSeenIndex)
 		const mappingTitle = buildMappingTitle(record.backupName)
@@ -215,5 +242,48 @@ export class ContainerMappingStore {
 			}
 		}
 		return null
+	}
+
+	private async loadLocalMappings(): Promise<void> {
+		const payload = await this.browserApi.storage.local.get(LOCAL_MAPPING_STORAGE_KEY)
+		const records = payload[LOCAL_MAPPING_STORAGE_KEY]
+		if (!Array.isArray(records)) {
+			return
+		}
+
+		for (const value of records) {
+			const record = this.parseLocalRecord(value)
+			if (record) {
+				this.rememberRecord(record)
+			}
+		}
+	}
+
+	private async persistLocalMappings(): Promise<void> {
+		const records = [...this.byIndex.values()].sort((left, right) => left.firstSeenIndex - right.firstSeenIndex)
+		await this.browserApi.storage.local.set({ [LOCAL_MAPPING_STORAGE_KEY]: records })
+	}
+
+	private parseLocalRecord(value: unknown): ContainerMappingRecord | null {
+		if (value === null || typeof value !== 'object') {
+			return null
+		}
+
+		const candidate = value as Partial<ContainerMappingRecord>
+		if (
+			!Number.isInteger(candidate.firstSeenIndex)
+			|| (candidate.firstSeenIndex as number) < 0
+			|| typeof candidate.cookieStoreId !== 'string'
+			|| candidate.cookieStoreId.length === 0
+			|| typeof candidate.backupName !== 'string'
+		) {
+			return null
+		}
+
+		return {
+			firstSeenIndex: candidate.firstSeenIndex as number,
+			cookieStoreId: candidate.cookieStoreId,
+			backupName: candidate.backupName
+		}
 	}
 }
