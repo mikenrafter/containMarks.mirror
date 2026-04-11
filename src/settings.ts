@@ -7,7 +7,9 @@ export const DEFAULT_SETTINGS: ContainMarksSettings = {
 	targetFolderId: DEFAULT_TARGET_FOLDER_ID,
 	resetTokensOnStartup: false,
 	regenerateTokenOnEveryUse: true,
-	acknowledgeRiskyTokenBehavior: false
+	acknowledgeRiskyTokenBehavior: false,
+	showPageActionButton: true,
+	enableBookmarkSync: true
 }
 
 export function sanitizeSettings(value: unknown): ContainMarksSettings {
@@ -25,7 +27,9 @@ export function sanitizeSettings(value: unknown): ContainMarksSettings {
 		targetFolderId,
 		resetTokensOnStartup: candidate.resetTokensOnStartup ?? DEFAULT_SETTINGS.resetTokensOnStartup,
 		regenerateTokenOnEveryUse: candidate.regenerateTokenOnEveryUse ?? DEFAULT_SETTINGS.regenerateTokenOnEveryUse,
-		acknowledgeRiskyTokenBehavior: candidate.acknowledgeRiskyTokenBehavior ?? DEFAULT_SETTINGS.acknowledgeRiskyTokenBehavior
+		acknowledgeRiskyTokenBehavior: candidate.acknowledgeRiskyTokenBehavior ?? DEFAULT_SETTINGS.acknowledgeRiskyTokenBehavior,
+		showPageActionButton: candidate.showPageActionButton ?? DEFAULT_SETTINGS.showPageActionButton,
+		enableBookmarkSync: candidate.enableBookmarkSync ?? DEFAULT_SETTINGS.enableBookmarkSync
 	}
 }
 

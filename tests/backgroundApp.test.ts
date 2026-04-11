@@ -79,11 +79,13 @@ function createBrowserMock(options?: {
 	bookmarkByUrl?: Record<string, BookmarkNode[]>
 	bookmarkSearchByTitle?: Record<string, BookmarkNode[]>
 	containers?: ContextualIdentity[]
+	tabs?: Array<{ id: number, index: number, url?: string }>
 }): BrowserApi {
 	const bookmarkById = { ...(options?.bookmarkById ?? {}) }
 	const bookmarkByUrl = options?.bookmarkByUrl ?? {}
 	const bookmarkSearchByTitle = options?.bookmarkSearchByTitle ?? {}
 	const containers = options?.containers ?? []
+	const tabs = options?.tabs ?? []
 	const extensionStorage = new MemoryExtensionStorage()
 	let createdIndex = 0
 
@@ -113,6 +115,9 @@ function createBrowserMock(options?: {
 			]),
 			getChildren: vi.fn().mockImplementation(async (id: string) => {
 				return Object.values(bookmarkById).filter((node) => node.parentId === id)
+			}),
+			remove: vi.fn().mockImplementation(async (id: string) => {
+				delete bookmarkById[id]
 			}),
 			update: vi.fn().mockImplementation(async (id: string, changes: { url?: string; title?: string }) => {
 				const existing = bookmarkById[id] ?? { id, type: 'bookmark' as const }
@@ -177,7 +182,11 @@ function createBrowserMock(options?: {
 			TAB_ID_NONE: -1,
 			create: vi.fn().mockResolvedValue(undefined),
 			remove: vi.fn().mockResolvedValue(undefined),
+			query: vi.fn().mockResolvedValue(tabs),
 			highlight: vi.fn().mockResolvedValue(undefined),
+			onActivated: {
+				addListener: vi.fn()
+			},
 			onUpdated: {
 				addListener: vi.fn()
 			}
@@ -186,6 +195,8 @@ function createBrowserMock(options?: {
 			create: vi.fn().mockResolvedValue('notification-id')
 		},
 		pageAction: {
+			show: vi.fn().mockResolvedValue(undefined),
+			hide: vi.fn().mockResolvedValue(undefined),
 			onClicked: {
 				addListener: vi.fn()
 			}
@@ -538,5 +549,98 @@ describe('BackgroundApp', () => {
 
 		expect(result).toBeNull()
 		expect(updateMock.mock.calls.length).toBe(beforeCallCount)
+	})
+
+	it('hides page-action button when setting disables it', async () => {
+		await browserApi.storage.local.set({
+			'containMarks.settings': {
+				targetFolderId: 'toolbar_____',
+				resetTokensOnStartup: false,
+				regenerateTokenOnEveryUse: true,
+				acknowledgeRiskyTokenBehavior: false,
+				showPageActionButton: false,
+				enableBookmarkSync: true
+			}
+		})
+
+		const app = new BackgroundApp(browserApi, storage, logger, () => 0.5)
+		await app.handleTabUpdated(22, { status: 'complete', url: 'https://example.com' }, { id: 22, index: 0, url: 'https://example.com' })
+
+		expect(browserApi.pageAction.hide).toHaveBeenCalledWith(22)
+	})
+
+	it('ignores page-action clicks when setting disables button', async () => {
+		await browserApi.storage.local.set({
+			'containMarks.settings': {
+				targetFolderId: 'toolbar_____',
+				resetTokensOnStartup: false,
+				regenerateTokenOnEveryUse: true,
+				acknowledgeRiskyTokenBehavior: false,
+				showPageActionButton: false,
+				enableBookmarkSync: true
+			}
+		})
+
+		const app = new BackgroundApp(browserApi, storage, logger, () => 0.5)
+		await app.handlePageActionClicked({
+			id: 23,
+			index: 0,
+			title: 'Should not create bookmark',
+			url: 'https://example.com/no-op',
+			cookieStoreId: 'firefox-container-1'
+		})
+
+		expect(browserApi.bookmarks.create).not.toHaveBeenCalled()
+	})
+
+	it('keeps mappings local when bookmark sync is disabled', async () => {
+		await browserApi.storage.local.set({
+			'containMarks.settings': {
+				targetFolderId: 'toolbar_____',
+				resetTokensOnStartup: false,
+				regenerateTokenOnEveryUse: true,
+				acknowledgeRiskyTokenBehavior: false,
+				showPageActionButton: true,
+				enableBookmarkSync: false
+			}
+		})
+
+		const app = new BackgroundApp(browserApi, storage, logger, () => 0.5)
+		await app.startup()
+		await app.handlePageActionClicked({
+			id: 25,
+			index: 0,
+			title: 'Local mapping mode',
+			url: 'https://example.com/local-only',
+			cookieStoreId: 'firefox-container-1'
+		})
+
+		expect(browserApi.bookmarks.create).not.toHaveBeenCalledWith(
+			expect.objectContaining({ type: 'folder', title: 'ContainMarks Sync' })
+		)
+		expect(browserApi.bookmarks.update).toHaveBeenCalledWith(
+			expect.any(String),
+			expect.objectContaining({
+				url: expect.stringMatching(/^about:[^:]+:\d+:https:\/\/example\.com\/local-only$/)
+			})
+		)
+	})
+
+	it('refreshes page-action visibility when user switches tabs', async () => {
+		await browserApi.storage.local.set({
+			'containMarks.settings': {
+				targetFolderId: 'toolbar_____',
+				resetTokensOnStartup: false,
+				regenerateTokenOnEveryUse: true,
+				acknowledgeRiskyTokenBehavior: false,
+				showPageActionButton: false,
+				enableBookmarkSync: true
+			}
+		})
+
+		const app = new BackgroundApp(browserApi, storage, logger, () => 0.5)
+		await app.handleTabActivated({ tabId: 31 })
+
+		expect(browserApi.pageAction.hide).toHaveBeenCalledWith(31)
 	})
 })

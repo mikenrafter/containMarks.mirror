@@ -1,7 +1,7 @@
 {
 	"name": "ContainMarks",
 	"description": "Natively and easily edit and open bookmarks in multi-account containers.",
-	"version": "1.1.0",
+	"version": "1.1.5",
 	"manifest_version": 2,
 
 	"author": "Mikenrafter",

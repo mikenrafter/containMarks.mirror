@@ -14,6 +14,31 @@ export const TOKEN_SEGMENT_MIN_LENGTH = 6
 export const SYNC_FOLDER_PARENT_ID = 'menu________'
 export const SYNC_FOLDER_TITLE = 'ContainMarks Sync'
 export const MAPPING_TITLE_PREFIX = 'Mapping: '
+export const LOCAL_MAPPING_STORAGE_KEY = 'containMarks.localMappings'
+
+/** Parses an untyped value into a ContainerMappingRecord, returning null if the shape is invalid. */
+export function parseMappingRecord(value: unknown): ContainerMappingRecord | null {
+	if (value === null || typeof value !== 'object') {
+		return null
+	}
+
+	const candidate = value as Partial<ContainerMappingRecord>
+	if (
+		!Number.isInteger(candidate.firstSeenIndex)
+		|| (candidate.firstSeenIndex as number) < 0
+		|| typeof candidate.cookieStoreId !== 'string'
+		|| candidate.cookieStoreId.length === 0
+		|| typeof candidate.backupName !== 'string'
+	) {
+		return null
+	}
+
+	return {
+		firstSeenIndex: candidate.firstSeenIndex as number,
+		cookieStoreId: candidate.cookieStoreId,
+		backupName: candidate.backupName
+	}
+}
 
 export interface BookmarkTokenSource {
 	value?: string
