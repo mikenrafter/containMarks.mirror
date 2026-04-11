@@ -1,13 +1,13 @@
 import {
 	buildContainerMappingUrl,
 	buildMappingTitle,
+	LOCAL_MAPPING_STORAGE_KEY,
 	parseContainerMappingBookmark,
+	parseMappingRecord,
 	SYNC_FOLDER_PARENT_ID,
 	SYNC_FOLDER_TITLE
 } from './containerMappings'
 import type { BookmarkNode, BrowserApi, ContainerMappingRecord, ContextualIdentity, LoggerLike } from './models'
-
-const LOCAL_MAPPING_STORAGE_KEY = 'containMarks.localMappings'
 
 interface ContainerMappingStoreOptions {
 	enableBookmarkSync: boolean
@@ -252,7 +252,7 @@ export class ContainerMappingStore {
 		}
 
 		for (const value of records) {
-			const record = this.parseLocalRecord(value)
+			const record = parseMappingRecord(value)
 			if (record) {
 				this.rememberRecord(record)
 			}
@@ -262,28 +262,5 @@ export class ContainerMappingStore {
 	private async persistLocalMappings(): Promise<void> {
 		const records = [...this.byIndex.values()].sort((left, right) => left.firstSeenIndex - right.firstSeenIndex)
 		await this.browserApi.storage.local.set({ [LOCAL_MAPPING_STORAGE_KEY]: records })
-	}
-
-	private parseLocalRecord(value: unknown): ContainerMappingRecord | null {
-		if (value === null || typeof value !== 'object') {
-			return null
-		}
-
-		const candidate = value as Partial<ContainerMappingRecord>
-		if (
-			!Number.isInteger(candidate.firstSeenIndex)
-			|| (candidate.firstSeenIndex as number) < 0
-			|| typeof candidate.cookieStoreId !== 'string'
-			|| candidate.cookieStoreId.length === 0
-			|| typeof candidate.backupName !== 'string'
-		) {
-			return null
-		}
-
-		return {
-			firstSeenIndex: candidate.firstSeenIndex as number,
-			cookieStoreId: candidate.cookieStoreId,
-			backupName: candidate.backupName
-		}
 	}
 }

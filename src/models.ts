@@ -114,6 +114,7 @@ export interface BookmarksApi {
 	get(id: string): Promise<BookmarkNode[]>
 	getTree(): Promise<BookmarkNode[]>
 	getChildren(id: string): Promise<BookmarkNode[]>
+	remove(id: string): Promise<void>
 	update(id: string, changes: { url?: string; title?: string }): Promise<BookmarkNode>
 	create(details: {
 		parentId: string

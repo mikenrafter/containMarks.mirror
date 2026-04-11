@@ -116,6 +116,9 @@ function createBrowserMock(options?: {
 			getChildren: vi.fn().mockImplementation(async (id: string) => {
 				return Object.values(bookmarkById).filter((node) => node.parentId === id)
 			}),
+			remove: vi.fn().mockImplementation(async (id: string) => {
+				delete bookmarkById[id]
+			}),
 			update: vi.fn().mockImplementation(async (id: string, changes: { url?: string; title?: string }) => {
 				const existing = bookmarkById[id] ?? { id, type: 'bookmark' as const }
 				const updated = {

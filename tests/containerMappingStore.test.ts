@@ -28,6 +28,12 @@ function createMappingStoreBrowserMock(options?: {
 			}
 			return []
 		}),
+		remove: vi.fn().mockImplementation(async (id: string) => {
+			const index = mappingChildren.findIndex((node) => node.id === id)
+			if (index >= 0) {
+				mappingChildren.splice(index, 1)
+			}
+		}),
 		update: vi.fn().mockImplementation(async (id: string, changes: { title?: string; url?: string }) => {
 			const index = mappingChildren.findIndex((node) => node.id === id)
 			if (index >= 0) {
