@@ -51,7 +51,10 @@
 
 	"browser_specific_settings": {
 		"gecko": {
-			"id": "cont@bmarks"
+			"id": "cont@bmarks",
+			"data_collection_permissions": {
+				"required": ["none"]
+			}
 		}
 	}
 }
