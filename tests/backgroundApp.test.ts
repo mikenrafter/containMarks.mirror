@@ -181,6 +181,9 @@ function createBrowserMock(options?: {
 			remove: vi.fn().mockResolvedValue(undefined),
 			query: vi.fn().mockResolvedValue(tabs),
 			highlight: vi.fn().mockResolvedValue(undefined),
+			onActivated: {
+				addListener: vi.fn()
+			},
 			onUpdated: {
 				addListener: vi.fn()
 			}
@@ -618,5 +621,23 @@ describe('BackgroundApp', () => {
 				url: expect.stringMatching(/^about:[^:]+:\d+:https:\/\/example\.com\/local-only$/)
 			})
 		)
+	})
+
+	it('refreshes page-action visibility when user switches tabs', async () => {
+		await browserApi.storage.local.set({
+			'containMarks.settings': {
+				targetFolderId: 'toolbar_____',
+				resetTokensOnStartup: false,
+				regenerateTokenOnEveryUse: true,
+				acknowledgeRiskyTokenBehavior: false,
+				showPageActionButton: false,
+				enableBookmarkSync: true
+			}
+		})
+
+		const app = new BackgroundApp(browserApi, storage, logger, () => 0.5)
+		await app.handleTabActivated({ tabId: 31 })
+
+		expect(browserApi.pageAction.hide).toHaveBeenCalledWith(31)
 	})
 })

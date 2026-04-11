@@ -92,6 +92,7 @@ function createMappingStoreBrowserMock(options?: {
 			remove: vi.fn().mockResolvedValue(undefined),
 			query: vi.fn().mockResolvedValue([]),
 			highlight: vi.fn().mockResolvedValue(undefined),
+			onActivated: { addListener: vi.fn() },
 			onUpdated: { addListener: vi.fn() }
 		},
 		notifications: {

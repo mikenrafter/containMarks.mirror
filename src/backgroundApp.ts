@@ -148,6 +148,7 @@ export class BackgroundApp {
 
 	private async syncPageActionVisibilityForTab(tabId: number, settings?: ContainMarksSettings): Promise<void> {
 		const activeSettings = settings ?? await this.settings
+		this.debug('pageAction visibility', { tabId, showPageActionButton: activeSettings.showPageActionButton })
 		if (activeSettings.showPageActionButton) {
 			await this.browserApi.pageAction.show(tabId)
 			return
@@ -424,6 +425,16 @@ export class BackgroundApp {
 		}
 	}
 
+	public readonly handleTabActivated = async (activeInfo: { tabId: number }): Promise<void> => {
+		try {
+			if (activeInfo.tabId !== this.browserApi.tabs.TAB_ID_NONE) {
+				await this.syncPageActionVisibilityForTab(activeInfo.tabId)
+			}
+		} catch (error) {
+			this.debug(error)
+		}
+	}
+
 	/**
 	 * Creates a new bookmark for the current tab and optionally assigns it to a container.
 	 *
@@ -439,6 +450,9 @@ export class BackgroundApp {
 
 			const settings = await this.settings
 			if (!settings.showPageActionButton) {
+				if (tab.id !== undefined) {
+					await this.syncPageActionVisibilityForTab(tab.id)
+				}
 				return
 			}
 			const mappingStore = this.getMappingStore(settings)
@@ -480,6 +494,7 @@ export class BackgroundApp {
 		this.browserApi.menus.onClicked.addListener(this.handleMenuClick)
 		this.browserApi.menus.onShown.addListener(this.handleMenuShown)
 		this.browserApi.tabs.onUpdated.addListener(this.handleTabUpdated)
+		this.browserApi.tabs.onActivated.addListener(this.handleTabActivated)
 		this.browserApi.pageAction.onClicked.addListener(this.handlePageActionClicked)
 	}
 }

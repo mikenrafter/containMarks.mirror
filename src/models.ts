@@ -78,6 +78,10 @@ export interface TabChangeInfo {
 	url?: string
 }
 
+export interface TabActivatedInfo {
+	tabId: number
+}
+
 export interface Tab {
 	id?: number
 	url?: string
@@ -146,6 +150,9 @@ export interface TabsApi {
 	remove(tabId: number): Promise<void>
 	query(queryInfo: Record<string, never>): Promise<Tab[]>
 	highlight(details: { populate: boolean; tabs: number[] }): Promise<void>
+	onActivated: {
+		addListener(listener: (activeInfo: TabActivatedInfo) => void | Promise<void>): void
+	}
 	onUpdated: {
 		addListener(listener: (id: number, changeInfo: TabChangeInfo, tab: Tab) => void | Promise<void>): void
 	}
