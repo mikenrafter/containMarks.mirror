@@ -1,4 +1,5 @@
 import { DEFAULT_SETTINGS, hasRiskyTokenBehavior, loadSettings, saveSettings } from './settings'
+import { SYNC_FOLDER_PARENT_ID, SYNC_FOLDER_TITLE } from './containerMappings'
 import type { BookmarkNode, BrowserApi, ContainMarksSettings } from './models'
 
 const RISK_LINK = 'https://gitlab.com/mikenrafter/containmarks#security'
@@ -22,12 +23,20 @@ function collectFolderOptions(nodes: BookmarkNode[], parentPath: string): Folder
 			continue
 		}
 
-		const title = node.title?.trim() || '(Untitled Folder)'
+		const isSyncFolderAtOfficialPath = node.parentId === SYNC_FOLDER_PARENT_ID && node.title?.trim() === SYNC_FOLDER_TITLE
+		if (isSyncFolderAtOfficialPath) {
+			continue
+		}
+
+		const titleValue = node.title?.trim() ?? ''
+		const isGlobalRoot = parentPath === '' && titleValue.length === 0
+		const title = isGlobalRoot ? '/' : titleValue || '(Untitled Folder)'
 		const path = parentPath ? `${parentPath} / ${title}` : title
 		options.push({ id: node.id, label: path })
 
 		if (Array.isArray(node.children) && node.children.length > 0) {
-			options.push(...collectFolderOptions(node.children, path))
+			const childParentPath = isGlobalRoot ? '' : path
+			options.push(...collectFolderOptions(node.children, childParentPath))
 		}
 	}
 	return options

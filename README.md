@@ -11,16 +11,16 @@ Get it [here! <img src="./src/icons/icon.svg" width="200" height="200" alt="A bo
 Quickly bookmark the current page + container combo:  
 ![Omnibar usage example](./product-page/usage-omnibar.gif)
 
-Assign a container from the bookmark context menu:
+Assign a container from the bookmark context menu:  
 ![Context menu usage example](./product-page/usage-context.png)
 
-Easily edit assigned bookmarks with the native bookmark UI:
+Easily edit assigned bookmarks with the native bookmark UI:  
 ![Edit usage example](./product-page/usage-edit.gif)
 
-Assign whole folders in one pass:
+Assign whole folders in one pass:  
 ![Folder assignment usage example](./product-page/usage-folder.gif)
 
-Choose where quick bookmarks are saved from the options page:
+Choose where quick bookmarks are saved from the options page:  
 ![Set target folder](./product-page/usage-target.png)
 
 ---
