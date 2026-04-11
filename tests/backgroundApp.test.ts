@@ -91,7 +91,12 @@ function createBrowserMock(options?: {
 
 	return {
 		bookmarks: {
-			search: vi.fn().mockImplementation(async (query: { query?: string, url?: string, title?: string }) => {
+			search: vi.fn().mockImplementation(async (query: string | { query?: string, url?: string, title?: string }) => {
+				if (typeof query === 'string') {
+					return Object.values(bookmarkById).filter((item) =>
+						(item.url && item.url.includes(query)) || (item.title && item.title.includes(query))
+					)
+				}
 				if (typeof query.url === 'string') {
 					if (bookmarkByUrl[query.url]) {
 						return bookmarkByUrl[query.url]
@@ -150,6 +155,9 @@ function createBrowserMock(options?: {
 			}),
 			onRemoved: {
 				addListener: vi.fn()
+			},
+			onChanged: {
+				addListener: vi.fn()
 			}
 		},
 		menus: {
@@ -160,6 +168,9 @@ function createBrowserMock(options?: {
 				addListener: vi.fn()
 			},
 			onShown: {
+				addListener: vi.fn()
+			},
+			onHidden: {
 				addListener: vi.fn()
 			}
 		},
@@ -182,6 +193,9 @@ function createBrowserMock(options?: {
 			TAB_ID_NONE: -1,
 			create: vi.fn().mockResolvedValue(undefined),
 			remove: vi.fn().mockResolvedValue(undefined),
+			get: vi.fn().mockImplementation(async (tabId: number) => {
+				return tabs.find(t => t.id === tabId) ?? { id: tabId, index: 0 }
+			}),
 			query: vi.fn().mockResolvedValue(tabs),
 			highlight: vi.fn().mockResolvedValue(undefined),
 			onActivated: {
@@ -198,6 +212,16 @@ function createBrowserMock(options?: {
 			show: vi.fn().mockResolvedValue(undefined),
 			hide: vi.fn().mockResolvedValue(undefined),
 			onClicked: {
+				addListener: vi.fn()
+			}
+		},
+		webNavigation: {
+			onBeforeNavigate: {
+				addListener: vi.fn()
+			}
+		},
+		webRequest: {
+			onBeforeRequest: {
 				addListener: vi.fn()
 			}
 		},
@@ -221,6 +245,11 @@ describe('background helpers', () => {
 			token: 'token-123',
 			containerIndex: 7
 		})
+		expect(parseBookmarkUrl('https://example.com#cm:token-123:7')).toEqual({
+			url: 'https://example.com',
+			token: 'token-123',
+			containerIndex: 7
+		})
 	})
 
 	/**
@@ -231,6 +260,8 @@ describe('background helpers', () => {
 		expect(isPrefixedUrl('about:token-123:7:https://example.com')).toBe(true)
 		expect(isPrefixedUrl('about:short:7:https://example.com')).toBe(false)
 		expect(isPrefixedUrl('https://example.com')).toBe(false)
+		expect(isPrefixedUrl('https://example.com#cm:token-123:7')).toBe(true)
+		expect(isPrefixedUrl('https://example.com#cm:short:7')).toBe(false)
 	})
 })
 
@@ -247,7 +278,7 @@ describe('BackgroundApp', () => {
 				'bookmark-1': {
 					id: 'bookmark-1',
 					type: 'bookmark',
-					url: 'about:token-123:0:https://example.com'
+					url: 'https://example.com#cm:token-123:0'
 				}
 			},
 			containers: [
@@ -285,13 +316,13 @@ describe('BackgroundApp', () => {
 		const refreshed = await app.ensureBookmarkContainerUrl({
 			id: 'bookmark-1',
 			type: 'bookmark',
-			url: 'about:token-123:0:https://example.com'
+			url: 'https://example.com#cm:token-123:0'
 		})
 
 		expect(refreshed?.token).toBeTruthy()
 		expect(browserApi.bookmarks.update).toHaveBeenCalledWith(
 			'bookmark-1',
-			expect.objectContaining({ url: expect.stringMatching(/^about:[^:]+:\d+:https:\/\/example\.com$/) })
+			expect.objectContaining({ url: expect.stringMatching(/^https:\/\/example\.com#cm:[^:]+:\d+$/) })
 		)
 	})
 
@@ -315,8 +346,8 @@ describe('BackgroundApp', () => {
 
 		await app.handleTabUpdated(
 			7,
-			{ status: 'complete', url: 'about:token-123:0:https://example.com' },
-			{ id: 7, index: 2, url: 'about:token-123:0:https://example.com' }
+			{ status: 'complete', url: 'https://example.com#cm:token-123:0' },
+			{ id: 7, index: 2, url: 'https://example.com#cm:token-123:0' }
 		)
 
 		expect(browserApi.tabs.create).toHaveBeenCalledWith({
@@ -333,7 +364,7 @@ describe('BackgroundApp', () => {
 	 * otherwise bookmarks transferred across devices lose correct container routing.
 	 */
 	it('opens synced bookmarks using container mapping cache without local token storage', async () => {
-		const syncedUrl = 'about:sync-token:0:https://example.com'
+		const syncedUrl = 'https://example.com#cm:sync-token:0'
 		const syncedBookmark: BookmarkNode = {
 			id: 'bookmark-sync-1',
 			type: 'bookmark',
@@ -407,7 +438,7 @@ describe('BackgroundApp', () => {
 		expect(browserApi.bookmarks.update).toHaveBeenCalledWith(
 			expect.any(String),
 			expect.objectContaining({
-				url: expect.stringMatching(/^about:[^:]+:\d+:https:\/\/example\.com$/)
+				url: expect.stringMatching(/^https:\/\/example\.com#cm:[^:]+:\d+$/)
 			})
 		)
 	})
@@ -423,7 +454,7 @@ describe('BackgroundApp', () => {
 				'bookmark-radio-1': {
 					id: 'bookmark-radio-1',
 					type: 'bookmark',
-					url: 'about:token-123:0:https://example.com'
+					url: 'https://example.com#cm:token-123:0'
 				}
 			},
 			containers: [
@@ -544,7 +575,7 @@ describe('BackgroundApp', () => {
 		const result = await app.ensureBookmarkContainerUrl({
 			id: 'bookmark-1',
 			type: 'bookmark',
-			url: 'about:token-123:0:https://example.com'
+			url: 'https://example.com#cm:token-123:0'
 		})
 
 		expect(result).toBeNull()
@@ -621,7 +652,7 @@ describe('BackgroundApp', () => {
 		expect(browserApi.bookmarks.update).toHaveBeenCalledWith(
 			expect.any(String),
 			expect.objectContaining({
-				url: expect.stringMatching(/^about:[^:]+:\d+:https:\/\/example\.com\/local-only$/)
+				url: expect.stringMatching(/^https:\/\/example\.com\/local-only#cm:[^:]+:\d+$/)
 			})
 		)
 	})

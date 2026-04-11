@@ -76,6 +76,9 @@ function createMappingStoreBrowserMock(options?: {
 		}),
 		onRemoved: {
 			addListener: vi.fn()
+		},
+		onChanged: {
+			addListener: vi.fn()
 		}
 	}
 
@@ -86,7 +89,8 @@ function createMappingStoreBrowserMock(options?: {
 			refresh: vi.fn(),
 			removeAll: vi.fn(),
 			onClicked: { addListener: vi.fn() },
-			onShown: { addListener: vi.fn() }
+			onShown: { addListener: vi.fn() },
+			onHidden: { addListener: vi.fn() }
 		},
 		contextualIdentities: {
 			query: vi.fn().mockResolvedValue([]),
@@ -96,6 +100,7 @@ function createMappingStoreBrowserMock(options?: {
 			TAB_ID_NONE: -1,
 			create: vi.fn().mockResolvedValue(undefined),
 			remove: vi.fn().mockResolvedValue(undefined),
+			get: vi.fn().mockResolvedValue({ id: 0, index: 0 }),
 			query: vi.fn().mockResolvedValue([]),
 			highlight: vi.fn().mockResolvedValue(undefined),
 			onActivated: { addListener: vi.fn() },
@@ -108,6 +113,16 @@ function createMappingStoreBrowserMock(options?: {
 			show: vi.fn().mockResolvedValue(undefined),
 			hide: vi.fn().mockResolvedValue(undefined),
 			onClicked: { addListener: vi.fn() }
+		},
+		webNavigation: {
+			onBeforeNavigate: {
+				addListener: vi.fn()
+			}
+		},
+		webRequest: {
+			onBeforeRequest: {
+				addListener: vi.fn()
+			}
 		},
 		storage: {
 			local: {

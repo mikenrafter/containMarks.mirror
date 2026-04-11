@@ -126,6 +126,9 @@ export interface BookmarksApi {
 	onRemoved: {
 		addListener(listener: (id: string, info: { node: BookmarkNode }) => void | Promise<void>): void
 	}
+	onChanged: {
+		addListener(listener: (id: string, changeInfo: { url?: string; title?: string }) => void | Promise<void>): void
+	}
 }
 
 export interface MenusApi {
@@ -138,6 +141,9 @@ export interface MenusApi {
 	onShown: {
 		addListener(listener: (info: MenusOnShownInfo) => void | Promise<void>): void
 	}
+	onHidden: {
+		addListener(listener: () => void | Promise<void>): void
+	}
 }
 
 export interface ContextualIdentitiesApi {
@@ -149,6 +155,7 @@ export interface TabsApi {
 	TAB_ID_NONE: number
 	create(details: { cookieStoreId: string; url: string; index: number }): Promise<void>
 	remove(tabId: number): Promise<void>
+	get(tabId: number): Promise<Tab>
 	query(queryInfo: Record<string, never>): Promise<Tab[]>
 	highlight(details: { populate: boolean; tabs: number[] }): Promise<void>
 	onActivated: {
@@ -171,6 +178,42 @@ export interface PageActionApi {
 	}
 }
 
+export interface WebNavigationBeforeNavigateDetails {
+	tabId: number
+	url: string
+	frameId: number
+}
+
+export interface WebNavigationApi {
+	onBeforeNavigate: {
+		addListener(
+			listener: (details: WebNavigationBeforeNavigateDetails) => void | Promise<void>,
+			filter?: { url: Array<{ urlContains?: string }> }
+		): void
+	}
+}
+
+export interface WebRequestBeforeRequestDetails {
+	requestId: string
+	tabId: number
+	url: string
+	type: string
+}
+
+export interface BlockingResponse {
+	cancel?: boolean
+}
+
+export interface WebRequestApi {
+	onBeforeRequest: {
+		addListener(
+			listener: (details: WebRequestBeforeRequestDetails) => BlockingResponse | void,
+			filter: { urls: string[]; types?: string[] },
+			extraInfoSpec?: string[]
+		): void
+	}
+}
+
 export interface BrowserApi {
 	bookmarks: BookmarksApi
 	menus: MenusApi
@@ -178,6 +221,8 @@ export interface BrowserApi {
 	tabs: TabsApi
 	notifications: NotificationsApi
 	pageAction: PageActionApi
+	webNavigation: WebNavigationApi
+	webRequest: WebRequestApi
 	storage: {
 		local: {
 			get(keys?: string | string[] | Record<string, unknown> | null): Promise<Record<string, unknown>>

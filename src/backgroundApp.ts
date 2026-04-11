@@ -1,7 +1,11 @@
 export const ENABLE_DEBUG_DEFAULT = false
 export const NO_CONTAINER = 'firefox-default'
+export const HOTSWAP_STORAGE_KEY = 'containMarks.hotswaps'
+/** How long to wait before reverting a hotswapped bookmark if no user edit is detected. */
+const HOTSWAP_REVERT_DELAY_MS = 1_000
 
 import type {
+	BlockingResponse,
 	BookmarkNode,
 	BookmarkReference,
 	BrowserApi,
@@ -13,13 +17,19 @@ import type {
 	MenusOnShownInfo,
 	StorageLike,
 	Tab,
-	TabChangeInfo
+	TabChangeInfo,
+	WebNavigationBeforeNavigateDetails,
+	WebRequestBeforeRequestDetails
 } from './models'
 import { ContainerMappingStore } from './containerMappingStore'
 import {
 	DELIMITER,
+	FRAGMENT_PREFIX,
 	PREFIX,
+	decodeToRealUrl,
 	getNewUrl,
+	isFragmentEncodedUrl,
+	isLegacyEncodedUrl,
 	isPrefixedUrl,
 	listStorageKeys,
 	parseBookmarkUrl,
@@ -27,13 +37,33 @@ import {
 } from './containerMappings'
 import { loadSettings } from './settings'
 
-export { DELIMITER, PREFIX, getNewUrl, isPrefixedUrl, parseBookmarkUrl } from './containerMappings'
+export { DELIMITER, FRAGMENT_PREFIX, PREFIX, getNewUrl, isFragmentEncodedUrl, isLegacyEncodedUrl, isPrefixedUrl, parseBookmarkUrl } from './containerMappings'
+
+interface HotswapRecord {
+	encodedUrl: string
+	containerIndex: number
+}
+
+interface PendingInterception {
+	containerIndex: number
+	realUrl: string
+	encodedUrl: string
+}
 
 /**
  * Coordinates extension runtime flows for menus, tab interception, migration, and quick bookmarking.
  *
  * Design note: this class owns event wiring, while mapping persistence remains delegated to
  * `ContainerMappingStore` and URL encoding rules remain delegated to `containerMappings`.
+ *
+ * Interception strategy: `webNavigation.onBeforeNavigate` detects fragment-encoded URLs (has
+ * access to the fragment) and flags the tab. `webRequest.onBeforeRequest` then cancels the
+ * HTTP request synchronously before any network activity. The tab is redirected to the correct
+ * container asynchronously after cancellation.
+ *
+ * Hotswap: when the user right-clicks a bookmark, the fragment encoding is temporarily removed
+ * so the native Properties dialog shows the clean URL. The encoding is restored after a timeout
+ * or when the user saves edits. Crash-safe via storage persistence.
  */
 export class BackgroundApp {
 	public enableDebug = ENABLE_DEBUG_DEFAULT
@@ -44,6 +74,23 @@ export class BackgroundApp {
 	}
 	private readonly syncMappingStore: ContainerMappingStore
 	private readonly localMappingStore: ContainerMappingStore
+
+	/**
+	 * Set in onBeforeNavigate (synchronous, has fragment), read in onBeforeRequest (synchronous
+	 * blocking cancel). Entries are short-lived — removed immediately when the request is cancelled.
+	 */
+	private readonly pendingInterceptions = new Map<number, PendingInterception>()
+
+	/**
+	 * Bookmarks that are currently decoded for the Properties dialog. Persisted to storage
+	 * so that a crash during hotswap doesn't permanently lose the encoding.
+	 */
+	private readonly hotswapRecords = new Map<string, HotswapRecord>()
+
+	/** Bookmark IDs whose next onChanged event is a self-update (decode or revert) to ignore. */
+	private readonly selfUpdateBookmarkIds = new Set<string>()
+
+	private readonly hotswapRevertTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 	public constructor(
 		private readonly browserApi: BrowserApi,
@@ -78,7 +125,9 @@ export class BackgroundApp {
 		const settings = await this.settings
 		const mappingStore = this.getMappingStore(settings)
 		await mappingStore.initialize()
+		await this.recoverPendingHotswaps()
 		await this.migrateLegacyStorage(mappingStore)
+		await this.migrateAboutBookmarks(mappingStore)
 		await this.syncPageActionVisibilityForAllTabs(settings)
 
 		if (settings.resetTokensOnStartup) {
@@ -118,9 +167,42 @@ export class BackgroundApp {
 		}
 	}
 
-	private async refreshTokensOnStartup(mappingStore: ContainerMappingStore): Promise<void> {
+	/**
+	 * Converts legacy `about:token:idx:url` bookmarks to the fragment-based scheme.
+	 * Only touches bookmarks that match the old encoding — mapping bookmark URLs
+	 * (short numeric "tokens") are excluded by isPrefixedUrl's token-length check.
+	 */
+	private async migrateAboutBookmarks(mappingStore: ContainerMappingStore): Promise<void> {
 		const bookmarks = await this.browserApi.bookmarks.search({ query: `${PREFIX}${DELIMITER}` })
 		for (const bookmark of bookmarks) {
+			if (bookmark.type !== 'bookmark' || typeof bookmark.url !== 'string') continue
+			if (!isLegacyEncodedUrl(bookmark.url)) continue
+
+			const parsed = parseBookmarkUrl(bookmark)
+			if (!parsed || !parsed.token || parsed.containerIndex === null) continue
+
+			const mapping = mappingStore.getByIndex(parsed.containerIndex)
+			if (!mapping) continue
+
+			const newUrl = getNewUrl({ value: parsed.token }, parsed.containerIndex, parsed.url)
+			if (bookmark.url !== newUrl) {
+				await this.browserApi.bookmarks.update(bookmark.id, { url: newUrl })
+			}
+		}
+	}
+
+	private async refreshTokensOnStartup(mappingStore: ContainerMappingStore): Promise<void> {
+		const legacyBookmarks = await this.browserApi.bookmarks.search({ query: `${PREFIX}${DELIMITER}` })
+		const fragmentBookmarks = await this.browserApi.bookmarks.search({ query: `#${FRAGMENT_PREFIX}${DELIMITER}` })
+
+		const seen = new Set<string>()
+		const allBookmarks = [...legacyBookmarks, ...fragmentBookmarks].filter(bookmark => {
+			if (seen.has(bookmark.id)) return false
+			seen.add(bookmark.id)
+			return true
+		})
+
+		for (const bookmark of allBookmarks) {
 			const parsed = parseBookmarkUrl(bookmark)
 			if (!parsed || !parsed.token || parsed.containerIndex === null) {
 				continue
@@ -132,6 +214,69 @@ export class BackgroundApp {
 			await this.ensureBookmarkContainerUrl(bookmark)
 		}
 	}
+
+	// --- Hotswap crash recovery ---
+
+	private async persistHotswapRecords(): Promise<void> {
+		const records: Record<string, HotswapRecord> = {}
+		for (const [id, record] of this.hotswapRecords) {
+			records[id] = record
+		}
+		await this.browserApi.storage.local.set({ [HOTSWAP_STORAGE_KEY]: records })
+	}
+
+	/**
+	 * On startup, re-encodes any bookmarks that were left decoded by a crash during hotswap.
+	 * Uses a fresh token since the old token was part of the now-stale encoded URL.
+	 */
+	private async recoverPendingHotswaps(): Promise<void> {
+		const payload = await this.browserApi.storage.local.get(HOTSWAP_STORAGE_KEY)
+		const records = payload[HOTSWAP_STORAGE_KEY]
+		if (!records || typeof records !== 'object') return
+
+		for (const [bookmarkId, record] of Object.entries(records as Record<string, HotswapRecord>)) {
+			if (!record?.encodedUrl || typeof record.containerIndex !== 'number') continue
+
+			try {
+				const bookmarks = await this.browserApi.bookmarks.get(bookmarkId)
+				const bookmark = bookmarks[0]
+				if (!bookmark?.url) continue
+
+				// Only re-encode if still decoded (not already fragment-encoded)
+				if (!isFragmentEncodedUrl(bookmark.url)) {
+					const newUrl = getNewUrl({ seed: this.randomValue }, record.containerIndex, bookmark.url)
+					await this.browserApi.bookmarks.update(bookmarkId, { url: newUrl })
+				}
+			} catch (error) {
+				this.debug('hotswap recovery failed for', bookmarkId, error)
+			}
+		}
+
+		await this.browserApi.storage.local.set({ [HOTSWAP_STORAGE_KEY]: {} })
+	}
+
+	private cancelHotswapTimer(bookmarkId: string): void {
+		const timer = this.hotswapRevertTimers.get(bookmarkId)
+		if (timer) {
+			clearTimeout(timer)
+			this.hotswapRevertTimers.delete(bookmarkId)
+		}
+	}
+
+	private async revertHotswap(bookmarkId: string, record: HotswapRecord): Promise<void> {
+		try {
+			this.hotswapRevertTimers.delete(bookmarkId)
+			this.hotswapRecords.delete(bookmarkId)
+			await this.persistHotswapRecords()
+
+			this.selfUpdateBookmarkIds.add(bookmarkId)
+			await this.browserApi.bookmarks.update(bookmarkId, { url: record.encodedUrl })
+		} catch (error) {
+			this.debug(error)
+		}
+	}
+
+	// --- Core helpers ---
 
 	private getMappingStore(settings: ContainMarksSettings): ContainerMappingStore {
 		return settings.enableBookmarkSync ? this.syncMappingStore : this.localMappingStore
@@ -364,12 +509,92 @@ export class BackgroundApp {
 		}
 	}
 
+	// --- Request interception (fragment-encoded bookmark navigation) ---
+
+	/**
+	 * MUST be fully synchronous — no awaits. Populates `pendingInterceptions` so that the
+	 * subsequent `onBeforeRequest` handler can cancel the HTTP request before any network activity.
+	 *
+	 * Only processes top-level frame navigations (`frameId === 0`).
+	 */
+	public readonly handleBeforeNavigate = (details: WebNavigationBeforeNavigateDetails): void => {
+		if (details.frameId !== 0) return
+		if (!isFragmentEncodedUrl(details.url)) return
+
+		const parsed = parseBookmarkUrl(details.url)
+		if (!parsed || parsed.containerIndex === null) return
+
+		this.pendingInterceptions.set(details.tabId, {
+			containerIndex: parsed.containerIndex,
+			realUrl: parsed.url,
+			encodedUrl: details.url
+		})
+	}
+
+	/**
+	 * Synchronous blocking handler — returns `{ cancel: true }` immediately when the tab was
+	 * flagged by `handleBeforeNavigate`. The async container-open work is fire-and-forget so
+	 * the cancel response is not delayed.
+	 *
+	 * Only intercepts `main_frame` requests (iframes and XHR are never touched).
+	 */
+	public readonly handleBeforeRequest = (details: WebRequestBeforeRequestDetails): BlockingResponse | void => {
+		if (details.type !== 'main_frame') return
+
+		const interception = this.pendingInterceptions.get(details.tabId)
+		if (!interception) return
+
+		this.pendingInterceptions.delete(details.tabId)
+		void this.executeInterception(details.tabId, interception)
+
+		return { cancel: true }
+	}
+
+	private async executeInterception(tabId: number, interception: PendingInterception): Promise<void> {
+		try {
+			const settings = await this.settings
+			const mappingStore = this.getMappingStore(settings)
+			await mappingStore.initialize()
+
+			const mapping = mappingStore.getByIndex(interception.containerIndex)
+			if (!mapping) {
+				this.debug('missing mapping for interception', interception.containerIndex)
+				return
+			}
+
+			const tab = await this.browserApi.tabs.get(tabId)
+
+			await this.browserApi.tabs.create({
+				cookieStoreId: mapping.cookieStoreId,
+				url: interception.realUrl,
+				index: tab.index + 1
+			})
+			await this.browserApi.tabs.remove(tabId)
+
+			if (settings.regenerateTokenOnEveryUse) {
+				const bookmarks = await this.browserApi.bookmarks.search(interception.encodedUrl)
+				const bookmark = bookmarks.find(b => b.type === 'bookmark' && b.url === interception.encodedUrl)
+				if (bookmark) {
+					await this.ensureBookmarkContainerUrl(bookmark)
+				}
+			}
+		} catch (error) {
+			this.debug(error)
+		}
+	}
+
+	// --- Menu event handlers ---
+
 	public readonly handleMenuClick = async (info: MenusOnClickInfo): Promise<void> => {
 		const bookmark = await this.browserApi.bookmarks.get(info.bookmarkId);
 		this.debug(bookmark);
 		await this.applyContainer(bookmark, info.menuItemId);
 	}
 
+	/**
+	 * Rebuilds context-menu radio items to reflect the bookmark's container assignment, then
+	 * hotswaps the bookmark URL so the native Properties dialog shows the clean (decoded) URL.
+	 */
 	public readonly handleMenuShown = async (info: MenusOnShownInfo): Promise<void> => {
 		try {
 			if (info.contexts.includes('bookmark') && info.bookmarkId) {
@@ -380,7 +605,24 @@ export class BackgroundApp {
 				}
 
 				if (bookmark) {
+					// Build menu with the ORIGINAL encoded URL so radio state is correct
 					await this.rebuildMenuItems(bookmark)
+
+					// Hotswap: temporarily decode so Properties dialog shows the clean URL
+					if (bookmark.type === 'bookmark' && bookmark.url && isFragmentEncodedUrl(bookmark.url)) {
+						const parsed = parseBookmarkUrl(bookmark.url)
+						if (parsed && parsed.containerIndex !== null) {
+							this.hotswapRecords.set(bookmark.id, {
+								encodedUrl: bookmark.url,
+								containerIndex: parsed.containerIndex
+							})
+							await this.persistHotswapRecords()
+
+							const realUrl = decodeToRealUrl(bookmark.url)
+							this.selfUpdateBookmarkIds.add(bookmark.id)
+							await this.browserApi.bookmarks.update(bookmark.id, { url: realUrl })
+						}
+					}
 				}
 			}
 		} catch (error) {
@@ -388,15 +630,71 @@ export class BackgroundApp {
 		}
 	}
 
+	/**
+	 * Starts revert timers for all currently-hotswapped bookmarks. If no user edit arrives
+	 * via `handleBookmarkChanged` before the timer fires, the encoding is restored.
+	 */
+	public readonly handleMenuHidden = async (): Promise<void> => {
+		for (const [bookmarkId, record] of this.hotswapRecords) {
+			if (this.hotswapRevertTimers.has(bookmarkId)) continue
+
+			const timer = setTimeout(() => {
+				void this.revertHotswap(bookmarkId, record)
+			}, HOTSWAP_REVERT_DELAY_MS)
+			this.hotswapRevertTimers.set(bookmarkId, timer)
+		}
+	}
+
+	/**
+	 * Detects user edits to hotswapped bookmarks. Self-updates (from our own decode/revert)
+	 * are filtered via `selfUpdateBookmarkIds`. Real user edits trigger re-encoding with the
+	 * same container assignment and a fresh token.
+	 */
+	public readonly handleBookmarkChanged = async (id: string, changeInfo: { url?: string; title?: string }): Promise<void> => {
+		if (this.selfUpdateBookmarkIds.has(id)) {
+			this.selfUpdateBookmarkIds.delete(id)
+			return
+		}
+
+		const record = this.hotswapRecords.get(id)
+		if (!record || !changeInfo.url) return
+
+		try {
+			this.cancelHotswapTimer(id)
+			this.hotswapRecords.delete(id)
+			await this.persistHotswapRecords()
+
+			// Re-encode the (possibly edited) URL with the same container
+			const newEncodedUrl = getNewUrl({ seed: this.randomValue }, record.containerIndex, changeInfo.url)
+			this.selfUpdateBookmarkIds.add(id)
+			await this.browserApi.bookmarks.update(id, { url: newEncodedUrl })
+		} catch (error) {
+			this.debug(error)
+		}
+	}
+
+	// --- Tab event handlers ---
+
+	/**
+	 * Fallback interception path for cases where `onBeforeRequest` didn't fire — e.g. same-page
+	 * fragment navigations where no HTTP request is made. Also handles legacy `about:` encoded
+	 * bookmarks that aren't intercepted by the webRequest pipeline.
+	 */
 	public readonly handleTabUpdated = async (id: number, change: TabChangeInfo, tab: Tab): Promise<void> => {
 		if (change.status === 'complete' && id !== this.browserApi.tabs.TAB_ID_NONE) {
 			await this.syncPageActionVisibilityForTab(id)
 		}
 
 		const currentUrl = tab.url ?? change.url ?? ''
-		if (change.status !== 'complete' || id === this.browserApi.tabs.TAB_ID_NONE || !isPrefixedUrl(currentUrl)) {
-			return;
+		if (id === this.browserApi.tabs.TAB_ID_NONE || !isPrefixedUrl(currentUrl)) {
+			return
 		}
+
+		// Fragment URLs: trigger on URL change (handles same-page navigation where no request fires)
+		// Legacy about: URLs: trigger only on status complete (original behavior)
+		const isFragment = isFragmentEncodedUrl(currentUrl)
+		if (isFragment && !change.url) return
+		if (!isFragment && change.status !== 'complete') return
 
 		const settings = await this.settings;
 		const mappingStore = this.getMappingStore(settings)
@@ -493,8 +791,16 @@ export class BackgroundApp {
 	private registerListeners(): void {
 		this.browserApi.menus.onClicked.addListener(this.handleMenuClick)
 		this.browserApi.menus.onShown.addListener(this.handleMenuShown)
+		this.browserApi.menus.onHidden.addListener(this.handleMenuHidden)
 		this.browserApi.tabs.onUpdated.addListener(this.handleTabUpdated)
 		this.browserApi.tabs.onActivated.addListener(this.handleTabActivated)
 		this.browserApi.pageAction.onClicked.addListener(this.handlePageActionClicked)
+		this.browserApi.bookmarks.onChanged.addListener(this.handleBookmarkChanged)
+		this.browserApi.webNavigation.onBeforeNavigate.addListener(this.handleBeforeNavigate)
+		this.browserApi.webRequest.onBeforeRequest.addListener(
+			this.handleBeforeRequest,
+			{ urls: ['<all_urls>'], types: ['main_frame'] },
+			['blocking']
+		)
 	}
 }

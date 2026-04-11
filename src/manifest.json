@@ -16,7 +16,11 @@
 		"cookies",
 		"storage",
 		"unlimitedStorage",
-		"notifications"
+		"notifications",
+		"webNavigation",
+		"webRequest",
+		"webRequestBlocking",
+		"<all_urls>"
 	],
 
 	"background": {
