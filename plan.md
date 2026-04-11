@@ -32,22 +32,31 @@ where the user changes the URL AND the fragment.
 
 ## P1 — Security
 
-### 3. Bookmarklet attack vector
+### 3. Strip orphaned `#cm:` encodings on bookmark creation
 
-**Problem**: An attacker crafts `https://evil.com#cm:anything:0` and convinces the user to
-bookmark it. On click, `onBeforeNavigate` detects the fragment and redirects to container 0.
+**Problem**: A malicious page or shared link could embed `#cm:token:idx` in a URL. If the
+user bookmarks that URL, the extension would treat it as a container-assigned bookmark on
+next click — opening it in a container the attacker chose.
 
-**Action**: Only intercept URLs whose `#cm:` encoding matches a **known bookmark** in the
-bookmark store (cross-reference against `bookmarks.search`). Reject unknown URLs so the
-fragment becomes harmless text.
+**Defense**: When a bookmark is **created** (`bookmarks.onCreated`), check whether its URL
+contains `#cm:` encoding. If it does:
+- Query `bookmarks.search` for all bookmarks with that **exact** full URL.
+- If this is the **only** bookmark with that URL → the user bookmarked a link containing
+  `#cm:` (likely malicious or accidental). Strip the `#cm:` encoding, leaving the clean URL.
+- If there are **other** bookmarks with that exact URL → the user duplicated/copied an
+  existing legit container bookmark. Leave the encoding intact.
 
-### 4. Back button loop with temporary containers
+**Temporary bypass setting**: Under the existing "I understand the risks" acknowledgment
+checkbox, add an `allowEncodedBookmarkImport` setting. When enabled, the creation-time
+strip is skipped (useful when importing or transferring bookmark collections). This setting
+**auto-reverts to `false`** on every extension startup — it's a one-session escape hatch.
 
-**Problem**: After a container redirect, the browser's back button navigates back to the
-encoded URL — which triggers a second interception → redirect loop.
-
-**Action**: Track recently-intercepted tab IDs with a short TTL. Skip re-interception for
-tabs within the TTL window.
+**Action**:
+1. Add `onCreated` listener and strip logic in `backgroundApp.ts`.
+2. Add `allowEncodedBookmarkImport` to settings schema with `acknowledgeRiskyTokenBehavior`
+   gate and auto-revert in `startup()`.
+3. Tests: imported bookmark with `#cm:` gets stripped; duplicated bookmark keeps encoding;
+   bypass setting skips strip; setting reverts on restart.
 
 ---
 
@@ -104,14 +113,30 @@ Migration functions become "upgrade from vN to vN+1".
 
 ---
 
+## P5 — Deferred (needs more design)
+
+### 9. Back button loop with temporary containers
+
+**Problem**: After a container redirect, the browser's back button navigates back to the
+encoded URL — which triggers a second interception → redirect loop. Interaction with
+temporary-container addons adds complexity.
+
+**Status**: Deferred. Needs analysis of Firefox back/forward cache behavior and testing
+with Multi-Account Containers and Temporary Containers addons before designing a solution.
+Candidate approach: track recently-intercepted tab IDs with a short TTL.
+
+---
+
 ## Execution Order
 
 | Phase | Items | Dependency |
 |-------|-------|------------|
 | A | #1 (double encode), #2 (fragment round-trip) | None — bug fixes |
-| B | #3 (bookmarklet attack), #4 (back button loop) | None — security |
+| B | #3 (creation-time strip + bypass setting) | None — security |
 | C | #5 (sync cache), #6 (poll evaluation) | None — performance |
 | D | #8 (urlCodec module extraction) | After A+B stabilize codecs |
 | E | #7 (orphan migration UX) | After D stabilizes module boundaries |
+| F | #9 (back button loop) | After real-world testing with temp container addons |
 
 Phases A–C are independent and can be parallelized. D depends on A+B. E depends on D.
+F is deferred until design is finalized.
