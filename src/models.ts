@@ -44,6 +44,11 @@ export interface ContainerMappingRecord {
 	backupName: string
 }
 
+export interface BookmarkTokenSource {
+	value?: string
+	seed?: () => number
+}
+
 export interface ContextualIdentity {
 	name: string
 	cookieStoreId: string

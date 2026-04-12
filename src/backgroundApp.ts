@@ -44,13 +44,14 @@ import {
 	isFragmentEncodedUrl,
 	isLegacyEncodedUrl,
 	isPrefixedUrl,
-	listStorageKeys,
-	parseBookmarkUrl,
+	readLegacyStorageKeys,
 	readLegacyReference,
-} from './containerMappings'
+	parseBookmarkUrl,
+	parseLegacyBookmarkUrl,
+} from './urlCodec'
 import { loadSettings, saveSettings } from './settings'
 
-export { DELIMITER, FRAGMENT_PREFIX, PREFIX, getNewUrl, isFragmentEncodedUrl, isLegacyEncodedUrl, isPrefixedUrl, parseBookmarkUrl } from './containerMappings'
+export { DELIMITER, FRAGMENT_PREFIX, PREFIX, getNewUrl, isFragmentEncodedUrl, isLegacyEncodedUrl, isPrefixedUrl, parseBookmarkUrl, parseLegacyBookmarkUrl } from './urlCodec'
 
 interface HotswapRecord {
 	encodedUrl: string
@@ -223,7 +224,7 @@ export class BackgroundApp {
 	 * bookmark URL with the new mapping index.
 	 */
 	private async migrateLegacyStorage(mappingStore: ContainerMappingStore): Promise<void> {
-		for (const key of listStorageKeys(this.storage)) {
+		for (const key of readLegacyStorageKeys(this.storage)) {
 			const reference = readLegacyReference(this.storage, key)
 			if (!reference || !reference?.backupName) continue;
 			this.storage.removeItem(key)
@@ -239,7 +240,7 @@ export class BackgroundApp {
 					continue
 				}
 
-				const parsed = parseBookmarkUrl(bookmark)
+				const parsed = parseLegacyBookmarkUrl(bookmark)
 				if (!parsed || !parsed.token || parsed.containerIndex !== null) {
 					continue
 				}
@@ -265,7 +266,7 @@ export class BackgroundApp {
 			if (bookmark.type !== 'bookmark' || typeof bookmark.url !== 'string') continue
 			if (!isLegacyEncodedUrl(bookmark.url)) continue
 
-			const parsed = parseBookmarkUrl(bookmark)
+			const parsed = parseLegacyBookmarkUrl(bookmark)
 			if (!parsed || !parsed.token || parsed.containerIndex === null) continue
 
 			const mapping = mappingStore.getByIndex(parsed.containerIndex)
@@ -294,7 +295,7 @@ export class BackgroundApp {
 		})
 
 		for (const bookmark of allBookmarks) {
-			const parsed = parseBookmarkUrl(bookmark)
+			const parsed = parseLegacyBookmarkUrl(bookmark)
 			if (!parsed || !parsed.token || parsed.containerIndex === null) {
 				continue
 			}

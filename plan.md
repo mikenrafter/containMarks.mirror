@@ -4,7 +4,7 @@
 
 This plan has advanced beyond the original baseline. Current verified state:
 
-- Tests: 42/42 passing
+- Tests: 94/94 passing
 - Typecheck: clean
 - Build: clean (`build:firefox:xpi` succeeds)
 
@@ -19,6 +19,13 @@ This plan has advanced beyond the original baseline. Current verified state:
   - Hotswap recovery and late-edit handling hardened
   - New-tab/new-window interception hardened (`about:blank` race covered via webNavigation path)
   - Temp Containers race/orphan cleanup behavior hardened
+- Phase D: done
+  - URL encoding extracted into `src/urlCodec.ts` with versioned codec chain (beta/v1.0.0/v1.1.0/v1.2.0)
+  - `parseBookmarkUrl` only handles v1.2.0 at runtime (security boundary)
+  - `parseLegacyBookmarkUrl` added for startup migration paths only
+  - Direct-to-current migration functions: `migrateFromBetaToCurrent`, `migrateFromV100ToCurrent`, `migrateFromV110ToCurrent`
+  - Legacy storage helpers renamed and moved to urlCodec
+  - `BookmarkTokenSource` moved to `models.ts`
 
 ### Additional completed scope (not in original phase table)
 
@@ -30,7 +37,7 @@ This plan has advanced beyond the original baseline. Current verified state:
 
 ### Recommended next phase
 
-- Phase D (#8): URL encoding extraction into a dedicated versioned codec module
+- Phase E (#7): local/sync migration UX with orphan warning
 
 ### Still pending
 
@@ -171,7 +178,7 @@ Candidate approach: track recently-intercepted tab IDs with a short TTL.
 | A | #1 (double encode), #2 (fragment round-trip) | None — bug fixes | done |
 | B | #3 (creation-time strip + bypass setting) | None — security | done |
 | C | #5 (sync cache), #6 (poll evaluation) | None — performance | done via interception/event hardening |
-| D | #8 (urlCodec module extraction) | After A+B stabilize codecs |
+| D | #8 (urlCodec module extraction) | After A+B stabilize codecs | done |
 | E | #7 (orphan migration UX) | After D stabilizes module boundaries |
 | F | #9 (back button loop) | After real-world testing with temp container addons |
 

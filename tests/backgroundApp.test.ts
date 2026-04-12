@@ -6,9 +6,10 @@ import {
 	getNewUrl,
 	isFragmentEncodedUrl,
 	isPrefixedUrl,
-	parseBookmarkUrl
+	parseBookmarkUrl,
+	parseLegacyBookmarkUrl
 } from '../src/backgroundApp'
-import { decodeToRealUrl } from '../src/containerMappings'
+import { decodeToRealUrl } from '../src/urlCodec'
 import type {
 	BookmarkNode,
 	BrowserApi,
@@ -258,13 +259,24 @@ describe('background helpers', () => {
 	 * Why this matters: URL parsing is the contract boundary for every bookmark operation.
 	 * A regression here breaks assignment, migration, and open-in-container flows globally.
 	 */
-	it('parses tokenized bookmark urls', () => {
-		expect(parseBookmarkUrl('about:token-123:7:https://example.com')).toEqual({
+	it('parses v1.2.0 fragment-encoded bookmark urls', () => {
+		expect(parseBookmarkUrl('https://example.com#cm:token-123:7')).toEqual({
 			url: 'https://example.com',
 			token: 'token-123',
 			containerIndex: 7
 		})
-		expect(parseBookmarkUrl('https://example.com#cm:token-123:7')).toEqual({
+	})
+
+	it('does not parse legacy about: urls at runtime (security boundary)', () => {
+		// parseBookmarkUrl only handles v1.2.0 — legacy formats are ignored to prevent
+		// attacker-crafted legacy URLs from being interpreted as container assignments.
+		const parsed = parseBookmarkUrl('about:token-123:7:https://example.com')
+		expect(parsed?.containerIndex).toBeNull()
+		expect(parsed?.token).toBe('')
+	})
+
+	it('parses legacy urls via parseLegacyBookmarkUrl (startup migration only)', () => {
+		expect(parseLegacyBookmarkUrl('about:token-123:7:https://example.com')).toEqual({
 			url: 'https://example.com',
 			token: 'token-123',
 			containerIndex: 7
@@ -276,7 +288,8 @@ describe('background helpers', () => {
 	 * This prevents false positives on normal browsing URLs and malformed tokens.
 	 */
 	it('detects containmarks bookmark urls', () => {
-		expect(isPrefixedUrl('about:token-123:7:https://example.com')).toBe(true)
+		// isPrefixedUrl only matches v1.2.0 at runtime
+		expect(isPrefixedUrl('about:token-123:7:https://example.com')).toBe(false)
 		expect(isPrefixedUrl('about:short:7:https://example.com')).toBe(false)
 		expect(isPrefixedUrl('https://example.com')).toBe(false)
 		expect(isPrefixedUrl('https://example.com#cm:token-123:7')).toBe(true)
