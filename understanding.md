@@ -21,8 +21,25 @@ Three supporting mechanisms were requested:
 - Crash recovery: hotswap records persisted to `containMarks.hotswaps` key, recovered on startup
 - Auto-migration: `migrateAboutBookmarks` converts legacy `about:token:idx:url` bookmarks to fragment format on startup
 - Manifest permissions: `webNavigation`, `webRequest`, `webRequestBlocking`, `<all_urls>`
-- All 25 tests pass, typecheck clean, build succeeds
+- All 42 tests pass, typecheck clean, build succeeds
 
-## What still needs work (Phase A–E)
+## What was delivered after Phase 0
 
-See `plan.md` for the phased hardening plan covering bugs (#1–2), security (#3–4), performance (#5–6), migration UX (#7), and architecture (#8).
+- Security hardening:
+	- Creation-time stripping of orphaned `#cm:` bookmark encodings
+	- One-session import bypass (`allowEncodedBookmarkImport`) with startup auto-revert
+- Hotswap and interception hardening:
+	- Late-edit safety paths and self-update guards
+	- New-tab/new-window interception reliability improvements
+	- `about:blank` timing/race mitigation via webNavigation interception path
+	- Temporary-container orphan-tab cleanup
+- Temporary Containers ecosystem integration:
+	- Detection and support for both Temporary Containers variants
+	- "Temporary Container" assignment menu path using extension API
+	- Filtering of ephemeral temp containers from assignable permanent-container list (with graceful fallback)
+
+## What still needs work
+
+Primary next phase: URL codec extraction and versioned module boundary cleanup (see `plan.md`, Phase D).
+
+After that: migration UX improvements (Phase E) and deferred back-button loop design (Phase F).

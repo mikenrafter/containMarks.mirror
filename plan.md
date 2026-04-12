@@ -1,5 +1,42 @@
 # ContainMarks v1.2.0 — Fragment Encoding Hardening Plan
 
+## Checkpoint Status (2026-04-12)
+
+This plan has advanced beyond the original baseline. Current verified state:
+
+- Tests: 42/42 passing
+- Typecheck: clean
+- Build: clean (`build:firefox:xpi` succeeds)
+
+### Completed
+
+- Phase A: done
+  - Double-encode guard and fragment round-trip hardening shipped
+- Phase B: done
+  - Creation-time strip of orphaned `#cm:` encodings shipped
+  - One-session bypass (`allowEncodedBookmarkImport`) with startup auto-revert shipped
+- Phase C: done (implemented via event-coverage hardening instead of polling)
+  - Hotswap recovery and late-edit handling hardened
+  - New-tab/new-window interception hardened (`about:blank` race covered via webNavigation path)
+  - Temp Containers race/orphan cleanup behavior hardened
+
+### Additional completed scope (not in original phase table)
+
+- Temporary Containers / Temporary Containers Plus integration
+  - Detection for both extension IDs
+  - "Temporary Container" assignment menu option
+  - API-driven open flow (`createTabInTempContainer`)
+  - Container assignment menu now filters ephemeral temp containers (graceful fallback if API is unavailable)
+
+### Recommended next phase
+
+- Phase D (#8): URL encoding extraction into a dedicated versioned codec module
+
+### Still pending
+
+- Phase E (#7): local/sync migration UX with orphan warning
+- Phase F (#9): back-button loop mitigation (deferred design)
+
 ## Overview
 
 The fragment-based URL encoding (`#cm:token:idx[#originalFragment]`) is functionally complete.
@@ -131,9 +168,9 @@ Candidate approach: track recently-intercepted tab IDs with a short TTL.
 
 | Phase | Items | Dependency |
 |-------|-------|------------|
-| A | #1 (double encode), #2 (fragment round-trip) | None — bug fixes |
-| B | #3 (creation-time strip + bypass setting) | None — security |
-| C | #5 (sync cache), #6 (poll evaluation) | None — performance |
+| A | #1 (double encode), #2 (fragment round-trip) | None — bug fixes | done |
+| B | #3 (creation-time strip + bypass setting) | None — security | done |
+| C | #5 (sync cache), #6 (poll evaluation) | None — performance | done via interception/event hardening |
 | D | #8 (urlCodec module extraction) | After A+B stabilize codecs |
 | E | #7 (orphan migration UX) | After D stabilizes module boundaries |
 | F | #9 (back button loop) | After real-world testing with temp container addons |
