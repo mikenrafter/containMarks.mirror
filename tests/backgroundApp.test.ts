@@ -376,7 +376,7 @@ describe('BackgroundApp', () => {
 		const app = new BackgroundApp(browserApi, storage, logger, () => 0.5)
 		await app.startup()
 
-		const refreshed = await app.ensureBookmarkContainerUrl({
+		const refreshed = await app.updateBookmarkContainerUrl({
 			id: 'bookmark-1',
 			type: 'bookmark',
 			url: 'https://example.com#cm:token-123:0'
@@ -635,7 +635,7 @@ describe('BackgroundApp', () => {
 
 		const updateMock = browserApi.bookmarks.update as unknown as { mock: { calls: unknown[] } }
 		const beforeCallCount = updateMock.mock.calls.length
-		const result = await app.ensureBookmarkContainerUrl({
+		const result = await app.updateBookmarkContainerUrl({
 			id: 'bookmark-1',
 			type: 'bookmark',
 			url: 'https://example.com#cm:token-123:0'

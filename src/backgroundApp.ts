@@ -114,7 +114,7 @@ export class BackgroundApp {
 	 * to intercept "Open in New Tab/Window" clicks that launch the decoded URL outside the
 	 * assigned container. Cleared when revert timers fire.
 	 */
-	private readonly pendingHotswapUrls = new Map<string, { containerIndex: number; bookmarkId: string }>()
+	private readonly hotswapRedirectMap = new Map<string, { containerIndex: number; bookmarkId: string }>()
 
 	public constructor(
 		private readonly browserApi: BrowserApi,
@@ -260,7 +260,7 @@ export class BackgroundApp {
 			if (!mapping) {
 				continue
 			}
-			await this.ensureBookmarkContainerUrl(bookmark)
+			await this.updateBookmarkContainerUrl(bookmark)
 		}
 	}
 
@@ -490,7 +490,7 @@ export class BackgroundApp {
 	 * - Does not mutate the bookmark when refreshing an encoded bookmark with a missing mapping.
 	 * 
 	 */
-	public async ensureBookmarkContainerUrl(bookmark: BookmarkNode, cookieStoreId: string | null = null): Promise<BookmarkReference | null> {
+	public async updateBookmarkContainerUrl(bookmark: BookmarkNode, cookieStoreId: string | null = null): Promise<BookmarkReference | null> {
 		if (!bookmark.id) {
 			return null
 		}
@@ -556,7 +556,7 @@ export class BackgroundApp {
 				if (bookmark.type === 'folder') {
 					await this.applyContainer(await this.browserApi.bookmarks.getChildren(bookmark.id), cookieStoreId)
 				} else {
-					await this.ensureBookmarkContainerUrl(bookmark, cookieStoreId);
+					await this.updateBookmarkContainerUrl(bookmark, cookieStoreId);
 				}
 			} catch (error) {
 				this.debug(error)
@@ -668,11 +668,11 @@ export class BackgroundApp {
 		if (details.frameId !== 0) return
 
 		// Hotswap interception — async fire-and-forget redirect for decoded bookmark URLs
-		if (this.pendingHotswapUrls.size > 0) {
-			const hotswapInfo = this.pendingHotswapUrls.get(details.url)
+		if (this.hotswapRedirectMap.size > 0) {
+			const hotswapInfo = this.hotswapRedirectMap.get(details.url)
 			if (hotswapInfo) {
 				this.debug('handleBeforeNavigate: hotswap match', details.url, '→ container', hotswapInfo.containerIndex)
-				this.pendingHotswapUrls.delete(details.url)
+				this.hotswapRedirectMap.delete(details.url)
 				void this.redirectHotswappedTab(details.tabId, details.url, hotswapInfo.containerIndex)
 				return
 			}
@@ -741,7 +741,7 @@ export class BackgroundApp {
 				const bookmarks = await this.browserApi.bookmarks.search(interception.encodedUrl)
 				const bookmark = bookmarks.find(b => b.type === 'bookmark' && b.url === interception.encodedUrl)
 				if (bookmark) {
-					await this.ensureBookmarkContainerUrl(bookmark)
+					await this.updateBookmarkContainerUrl(bookmark)
 				}
 			}
 		} catch (error) {
@@ -794,7 +794,7 @@ export class BackgroundApp {
 
 							// Eagerly register the decoded URL so new-tab interception works even
 							// if the tab is created before handleMenuHidden fires.
-							this.pendingHotswapUrls.set(realUrl, {
+							this.hotswapRedirectMap.set(realUrl, {
 								containerIndex: parsed.containerIndex,
 								bookmarkId: bookmark.id
 							})
@@ -824,13 +824,13 @@ export class BackgroundApp {
 
 			// Register the decoded URL for new-tab interception
 			const decodedUrl = decodeToRealUrl(record.encodedUrl)
-			this.pendingHotswapUrls.set(decodedUrl, {
+			this.hotswapRedirectMap.set(decodedUrl, {
 				containerIndex: record.containerIndex,
 				bookmarkId
 			})
 
 			const timer = setTimeout(() => {
-				this.pendingHotswapUrls.delete(decodedUrl)
+				this.hotswapRedirectMap.delete(decodedUrl)
 				void this.revertHotswap(bookmarkId, record)
 			}, HOTSWAP_REVERT_DELAY_MS)
 			this.hotswapRevertTimers.set(bookmarkId, timer)
@@ -938,14 +938,14 @@ export class BackgroundApp {
 	 * Compatible with Temporary Containers addons that assign non-default cookieStoreIds.
 	 */
 	public readonly handleTabCreated = async (tab: Tab): Promise<void> => {
-		this.debug('handleTabCreated', { url: tab.url, id: tab.id, cookieStoreId: tab.cookieStoreId, pendingCount: this.pendingHotswapUrls.size, pendingUrls: [...this.pendingHotswapUrls.keys()] })
-		if (this.pendingHotswapUrls.size === 0) return
+		this.debug('handleTabCreated', { url: tab.url, id: tab.id, cookieStoreId: tab.cookieStoreId, pendingCount: this.hotswapRedirectMap.size, pendingUrls: [...this.hotswapRedirectMap.keys()] })
+		if (this.hotswapRedirectMap.size === 0) return
 		if (!tab.url || !tab.id) {
 			this.debug('handleTabCreated: skipped — no url or id', { url: tab.url, id: tab.id })
 			return
 		}
 
-		const hotswapInfo = this.pendingHotswapUrls.get(tab.url)
+		const hotswapInfo = this.hotswapRedirectMap.get(tab.url)
 		if (!hotswapInfo) {
 			this.debug('handleTabCreated: no pending hotswap match for', tab.url)
 			return
@@ -967,7 +967,7 @@ export class BackgroundApp {
 			}
 
 			this.debug('handleTabCreated: redirecting tab', tab.id, 'to container', mapping.cookieStoreId)
-			this.pendingHotswapUrls.delete(tab.url)
+			this.hotswapRedirectMap.delete(tab.url)
 			await this.openInContainer(mapping.cookieStoreId, tab.url, tab)
 		} catch (error) {
 			this.debug('handleTabCreated: error', error)
@@ -980,8 +980,8 @@ export class BackgroundApp {
 	 * queries tabs in the new window and checks their URLs against `pendingHotswapUrls`.
 	 */
 	public readonly handleWindowCreated = async (window: import('./models').Window): Promise<void> => {
-		this.debug('handleWindowCreated', { windowId: window.id, pendingCount: this.pendingHotswapUrls.size, pendingUrls: [...this.pendingHotswapUrls.keys()] })
-		if (this.pendingHotswapUrls.size === 0) return
+		this.debug('handleWindowCreated', { windowId: window.id, pendingCount: this.hotswapRedirectMap.size, pendingUrls: [...this.hotswapRedirectMap.keys()] })
+		if (this.hotswapRedirectMap.size === 0) return
 		if (!window.id) return
 
 		try {
@@ -992,7 +992,7 @@ export class BackgroundApp {
 				const url = tab.url
 				if (!url || !tab.id) continue
 
-				const hotswapInfo = this.pendingHotswapUrls.get(url)
+				const hotswapInfo = this.hotswapRedirectMap.get(url)
 				if (!hotswapInfo) {
 					this.debug('handleWindowCreated: no pending hotswap match for', url)
 					continue
@@ -1011,7 +1011,7 @@ export class BackgroundApp {
 				}
 
 				this.debug('handleWindowCreated: redirecting tab', tab.id, 'to container', mapping.cookieStoreId)
-				this.pendingHotswapUrls.delete(url)
+				this.hotswapRedirectMap.delete(url)
 				await this.openInContainer(mapping.cookieStoreId, url, tab)
 			}
 		} catch (error) {
@@ -1034,9 +1034,9 @@ export class BackgroundApp {
 		// Check if this tab navigated to a hotswapped decoded URL ("Open in New Tab" during
 		// hotswap). Skips tabs already in the target container. Compatible with Temporary
 		// Containers addons that assign non-default cookieStoreIds to new tabs.
-		if (currentUrl && this.pendingHotswapUrls.size > 0) {
-			this.debug('handleTabUpdated: hotswap check', { tabId: id, currentUrl, cookieStoreId: tab.cookieStoreId, pendingUrls: [...this.pendingHotswapUrls.keys()] })
-			const hotswapInfo = this.pendingHotswapUrls.get(currentUrl)
+		if (currentUrl && this.hotswapRedirectMap.size > 0) {
+			this.debug('handleTabUpdated: hotswap check', { tabId: id, currentUrl, cookieStoreId: tab.cookieStoreId, pendingUrls: [...this.hotswapRedirectMap.keys()] })
+			const hotswapInfo = this.hotswapRedirectMap.get(currentUrl)
 			if (hotswapInfo && tab.id !== undefined) {
 				try {
 					const settings = await this.settings
@@ -1046,7 +1046,7 @@ export class BackgroundApp {
 					this.debug('handleTabUpdated: hotswap mapping', { containerIndex: hotswapInfo.containerIndex, mapping, tabCookieStoreId: tab.cookieStoreId })
 					if (mapping && tab.cookieStoreId !== mapping.cookieStoreId) {
 						this.debug('handleTabUpdated: redirecting tab', id, 'to container', mapping.cookieStoreId)
-						this.pendingHotswapUrls.delete(currentUrl)
+						this.hotswapRedirectMap.delete(currentUrl)
 						await this.openInContainer(mapping.cookieStoreId, currentUrl, tab)
 						return
 					} else if (mapping) {
@@ -1093,7 +1093,7 @@ export class BackgroundApp {
 		await this.openInContainer(mapping.cookieStoreId, parsed.url, tab);
 
 		if (settings.regenerateTokenOnEveryUse) {
-			await this.ensureBookmarkContainerUrl(bookmark);
+			await this.updateBookmarkContainerUrl(bookmark);
 		}
 	}
 
@@ -1149,7 +1149,7 @@ export class BackgroundApp {
 			})
 
 			if (assignedCookieStoreId !== null) {
-				const assigned = await this.ensureBookmarkContainerUrl(bookmark, assignedCookieStoreId)
+				const assigned = await this.updateBookmarkContainerUrl(bookmark, assignedCookieStoreId)
 				this.debug(assigned)
 			}
 
