@@ -35,7 +35,7 @@ import {
 	parseBookmarkUrl,
 	readLegacyReference,
 } from './containerMappings'
-import { loadSettings } from './settings'
+import { loadSettings, saveSettings } from './settings'
 
 export { DELIMITER, FRAGMENT_PREFIX, PREFIX, getNewUrl, isFragmentEncodedUrl, isLegacyEncodedUrl, isPrefixedUrl, parseBookmarkUrl } from './containerMappings'
 
@@ -125,6 +125,12 @@ export class BackgroundApp {
 		const settings = await this.settings
 		const mappingStore = this.getMappingStore(settings)
 		await mappingStore.initialize()
+
+		// Auto-revert the one-session bypass — always reset on startup
+		if (settings.allowEncodedBookmarkImport) {
+			await saveSettings(this.browserApi, { ...settings, allowEncodedBookmarkImport: false })
+		}
+
 		await this.recoverPendingHotswaps()
 		await this.migrateLegacyStorage(mappingStore)
 		await this.migrateAboutBookmarks(mappingStore)
@@ -673,6 +679,46 @@ export class BackgroundApp {
 		}
 	}
 
+	/**
+	 * Strips `#cm:` encoding from newly-created bookmarks that aren't duplicates of existing
+	 * encoded bookmarks. This prevents a malicious page or shared link from injecting a
+	 * container assignment into a URL the user bookmarks.
+	 *
+	 * When `allowEncodedBookmarkImport` is enabled (under "I understand the risks"), this
+	 * check is bypassed — useful during bulk import/transfer. That setting auto-reverts
+	 * to `false` on every extension startup.
+	 *
+	 * Duplicates (multiple bookmarks sharing the same encoded URL) are left intact because
+	 * they indicate the user copied an existing legit container-assigned bookmark.
+	 */
+	public readonly handleBookmarkCreated = async (id: string, bookmark: BookmarkNode): Promise<void> => {
+		if (bookmark.type !== 'bookmark' || !bookmark.url || !isFragmentEncodedUrl(bookmark.url)) {
+			return
+		}
+
+		try {
+			const settings = await this.settings
+			if (settings.allowEncodedBookmarkImport) {
+				return
+			}
+
+			// Check if another bookmark already has this exact encoded URL (duplicate/copy)
+			const matches = await this.browserApi.bookmarks.search(bookmark.url)
+			const duplicates = matches.filter(b => b.type === 'bookmark' && b.url === bookmark.url && b.id !== id)
+			if (duplicates.length > 0) {
+				return
+			}
+
+			// No duplicates — this is a freshly-bookmarked URL with embedded encoding. Strip it.
+			const cleanUrl = decodeToRealUrl(bookmark.url)
+			this.selfUpdateBookmarkIds.add(id)
+			await this.browserApi.bookmarks.update(id, { url: cleanUrl })
+			this.debug('stripped orphaned encoding from new bookmark', id, bookmark.url, '→', cleanUrl)
+		} catch (error) {
+			this.debug(error)
+		}
+	}
+
 	// --- Tab event handlers ---
 
 	/**
@@ -796,6 +842,7 @@ export class BackgroundApp {
 		this.browserApi.tabs.onActivated.addListener(this.handleTabActivated)
 		this.browserApi.pageAction.onClicked.addListener(this.handlePageActionClicked)
 		this.browserApi.bookmarks.onChanged.addListener(this.handleBookmarkChanged)
+		this.browserApi.bookmarks.onCreated.addListener(this.handleBookmarkCreated)
 		this.browserApi.webNavigation.onBeforeNavigate.addListener(this.handleBeforeNavigate)
 		this.browserApi.webRequest.onBeforeRequest.addListener(
 			this.handleBeforeRequest,

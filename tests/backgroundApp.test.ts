@@ -4,9 +4,11 @@ import {
 	BackgroundApp,
 	NO_CONTAINER,
 	getNewUrl,
+	isFragmentEncodedUrl,
 	isPrefixedUrl,
 	parseBookmarkUrl
 } from '../src/backgroundApp'
+import { decodeToRealUrl } from '../src/containerMappings'
 import type {
 	BookmarkNode,
 	BrowserApi,
@@ -158,6 +160,9 @@ function createBrowserMock(options?: {
 			},
 			onChanged: {
 				addListener: vi.fn()
+			},
+			onCreated: {
+				addListener: vi.fn()
 			}
 		},
 		menus: {
@@ -262,6 +267,56 @@ describe('background helpers', () => {
 		expect(isPrefixedUrl('https://example.com')).toBe(false)
 		expect(isPrefixedUrl('https://example.com#cm:token-123:7')).toBe(true)
 		expect(isPrefixedUrl('https://example.com#cm:short:7')).toBe(false)
+	})
+
+	it('preserves original fragments through encode/decode round-trip', () => {
+		const encoded = getNewUrl({ value: 'testtoken' }, 0, 'https://example.com/page#section')
+		expect(encoded).toBe('https://example.com/page#cm:testtoken:0#section')
+
+		const parsed = parseBookmarkUrl(encoded)
+		expect(parsed).toEqual({
+			url: 'https://example.com/page#section',
+			token: 'testtoken',
+			containerIndex: 0
+		})
+
+		const decoded = decodeToRealUrl(encoded)
+		expect(decoded).toBe('https://example.com/page#section')
+	})
+
+	it('handles URLs with no pre-existing fragment', () => {
+		const encoded = getNewUrl({ value: 'testtoken' }, 3, 'https://example.com')
+		expect(encoded).toBe('https://example.com#cm:testtoken:3')
+
+		const decoded = decodeToRealUrl(encoded)
+		expect(decoded).toBe('https://example.com')
+	})
+
+	it('prevents double fragment encoding', () => {
+		const firstEncode = getNewUrl({ value: 'firsttok' }, 0, 'https://example.com')
+		expect(firstEncode).toBe('https://example.com#cm:firsttok:0')
+
+		// Passing an already-encoded URL to getNewUrl must not double-encode
+		const secondEncode = getNewUrl({ value: 'secondtk' }, 1, firstEncode)
+		expect(secondEncode).toBe('https://example.com#cm:secondtk:1')
+		expect(secondEncode).not.toContain('#cm:firsttok')
+	})
+
+	it('prevents double encoding when original URL has a fragment', () => {
+		const firstEncode = getNewUrl({ value: 'firsttok' }, 0, 'https://example.com/page#section')
+		expect(firstEncode).toBe('https://example.com/page#cm:firsttok:0#section')
+
+		const secondEncode = getNewUrl({ value: 'secondtk' }, 2, firstEncode)
+		expect(secondEncode).toBe('https://example.com/page#cm:secondtk:2#section')
+		expect(secondEncode).not.toContain('#cm:firsttok')
+	})
+
+	it('identifies fragment-encoded vs plain URLs', () => {
+		expect(isFragmentEncodedUrl('https://example.com#cm:token-123:0')).toBe(true)
+		expect(isFragmentEncodedUrl('https://example.com#cm:token-123:0#section')).toBe(true)
+		expect(isFragmentEncodedUrl('https://example.com#section')).toBe(false)
+		expect(isFragmentEncodedUrl('https://example.com')).toBe(false)
+		expect(isFragmentEncodedUrl('about:token-123:0:https://example.com')).toBe(false)
 	})
 })
 
@@ -673,5 +728,93 @@ describe('BackgroundApp', () => {
 		await app.handleTabActivated({ tabId: 31 })
 
 		expect(browserApi.pageAction.hide).toHaveBeenCalledWith(31)
+	})
+
+	/**
+	 * Why this matters: prevents a malicious page or shared link from injecting a container
+	 * assignment. A URL like `https://evil.com#cm:token:0` bookmarked by the user should
+	 * have its encoding stripped since no existing bookmark has that exact URL.
+	 */
+	it('strips fragment encoding from newly-created bookmarks without duplicates', async () => {
+		const app = new BackgroundApp(browserApi, storage, logger, () => 0.5)
+
+		await app.handleBookmarkCreated('new-bookmark', {
+			id: 'new-bookmark',
+			type: 'bookmark',
+			url: 'https://evil.com#cm:injected:0'
+		})
+
+		expect(browserApi.bookmarks.update).toHaveBeenCalledWith(
+			'new-bookmark',
+			{ url: 'https://evil.com' }
+		)
+	})
+
+	it('preserves fragment encoding when a duplicate bookmark exists', async () => {
+		const encodedUrl = 'https://example.com#cm:token-123:0'
+		browserApi = createBrowserMock({
+			bookmarkById: {
+				'existing-1': { id: 'existing-1', type: 'bookmark', url: encodedUrl }
+			},
+			containers: [{ cookieStoreId: 'firefox-container-1', name: 'Work', icon: 'fingerprint', color: 'blue' }]
+		})
+
+		const app = new BackgroundApp(browserApi, storage, logger, () => 0.5)
+
+		// Create a duplicate bookmark with the same encoded URL
+		await app.handleBookmarkCreated('copy-1', {
+			id: 'copy-1',
+			type: 'bookmark',
+			url: encodedUrl
+		})
+
+		// Should NOT strip — a duplicate with the same URL already exists
+		expect(browserApi.bookmarks.update).not.toHaveBeenCalled()
+	})
+
+	it('skips strip when allowEncodedBookmarkImport is enabled', async () => {
+		await browserApi.storage.local.set({
+			'containMarks.settings': {
+				targetFolderId: 'toolbar_____',
+				resetTokensOnStartup: false,
+				regenerateTokenOnEveryUse: true,
+				acknowledgeRiskyTokenBehavior: true,
+				allowEncodedBookmarkImport: true,
+				showPageActionButton: true,
+				enableBookmarkSync: true
+			}
+		})
+
+		const app = new BackgroundApp(browserApi, storage, logger, () => 0.5)
+
+		await app.handleBookmarkCreated('imported-1', {
+			id: 'imported-1',
+			type: 'bookmark',
+			url: 'https://example.com#cm:import-t:0'
+		})
+
+		expect(browserApi.bookmarks.update).not.toHaveBeenCalled()
+	})
+
+	it('auto-reverts allowEncodedBookmarkImport on startup', async () => {
+		await browserApi.storage.local.set({
+			'containMarks.settings': {
+				targetFolderId: 'toolbar_____',
+				resetTokensOnStartup: false,
+				regenerateTokenOnEveryUse: true,
+				acknowledgeRiskyTokenBehavior: true,
+				allowEncodedBookmarkImport: true,
+				showPageActionButton: true,
+				enableBookmarkSync: true
+			}
+		})
+
+		const app = new BackgroundApp(browserApi, storage, logger, () => 0.5)
+		await app.startup()
+
+		// The setting should have been persisted as false via saveSettings
+		const settingsRaw = await browserApi.storage.local.get(['containMarks.settings'])
+		const savedSettings = settingsRaw['containMarks.settings'] as Record<string, unknown>
+		expect(savedSettings.allowEncodedBookmarkImport).toBe(false)
 	})
 })

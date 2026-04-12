@@ -79,6 +79,9 @@ function createMappingStoreBrowserMock(options?: {
 		},
 		onChanged: {
 			addListener: vi.fn()
+		},
+		onCreated: {
+			addListener: vi.fn()
 		}
 	}
 

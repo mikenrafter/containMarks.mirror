@@ -9,7 +9,8 @@ export const DEFAULT_SETTINGS: ContainMarksSettings = {
 	regenerateTokenOnEveryUse: true,
 	acknowledgeRiskyTokenBehavior: false,
 	showPageActionButton: true,
-	enableBookmarkSync: true
+	enableBookmarkSync: true,
+	allowEncodedBookmarkImport: false
 }
 
 export function sanitizeSettings(value: unknown): ContainMarksSettings {
@@ -29,7 +30,8 @@ export function sanitizeSettings(value: unknown): ContainMarksSettings {
 		regenerateTokenOnEveryUse: candidate.regenerateTokenOnEveryUse ?? DEFAULT_SETTINGS.regenerateTokenOnEveryUse,
 		acknowledgeRiskyTokenBehavior: candidate.acknowledgeRiskyTokenBehavior ?? DEFAULT_SETTINGS.acknowledgeRiskyTokenBehavior,
 		showPageActionButton: candidate.showPageActionButton ?? DEFAULT_SETTINGS.showPageActionButton,
-		enableBookmarkSync: candidate.enableBookmarkSync ?? DEFAULT_SETTINGS.enableBookmarkSync
+		enableBookmarkSync: candidate.enableBookmarkSync ?? DEFAULT_SETTINGS.enableBookmarkSync,
+		allowEncodedBookmarkImport: candidate.allowEncodedBookmarkImport ?? DEFAULT_SETTINGS.allowEncodedBookmarkImport
 	}
 }
 
@@ -42,7 +44,16 @@ export function validateSettings(settings: ContainMarksSettings): ContainMarksSe
 		return {
 			...settings,
 			resetTokensOnStartup: DEFAULT_SETTINGS.resetTokensOnStartup,
-			regenerateTokenOnEveryUse: DEFAULT_SETTINGS.regenerateTokenOnEveryUse
+			regenerateTokenOnEveryUse: DEFAULT_SETTINGS.regenerateTokenOnEveryUse,
+			allowEncodedBookmarkImport: false
+		}
+	}
+
+	// allowEncodedBookmarkImport is also risky — requires acknowledgment
+	if (settings.allowEncodedBookmarkImport && !settings.acknowledgeRiskyTokenBehavior) {
+		return {
+			...settings,
+			allowEncodedBookmarkImport: false
 		}
 	}
 

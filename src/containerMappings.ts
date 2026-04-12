@@ -166,9 +166,12 @@ export function getNewUrl(tokenSource: BookmarkTokenSource, containerIndex: numb
 		throw new Error('getNewUrl requires either tokenSource.value or tokenSource.seed')
 	}
 
-	const hashIndex = url.indexOf('#')
-	const baseUrl = hashIndex >= 0 ? url.slice(0, hashIndex) : url
-	const originalFragment = hashIndex >= 0 ? url.slice(hashIndex + 1) : ''
+	// Strip any pre-existing fragment encoding to prevent double-encoding
+	const cleanUrl = decodeToRealUrl(url)
+
+	const hashIndex = cleanUrl.indexOf('#')
+	const baseUrl = hashIndex >= 0 ? cleanUrl.slice(0, hashIndex) : cleanUrl
+	const originalFragment = hashIndex >= 0 ? cleanUrl.slice(hashIndex + 1) : ''
 
 	const encoding = [FRAGMENT_PREFIX, tokenString, String(containerIndex)].join(DELIMITER)
 	if (originalFragment) {

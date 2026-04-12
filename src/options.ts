@@ -171,7 +171,8 @@ function readFormValues(): ContainMarksSettings {
 		regenerateTokenOnEveryUse,
 		acknowledgeRiskyTokenBehavior,
 		showPageActionButton,
-		enableBookmarkSync
+		enableBookmarkSync,
+		allowEncodedBookmarkImport: DEFAULT_SETTINGS.allowEncodedBookmarkImport
 	}
 }
 

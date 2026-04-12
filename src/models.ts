@@ -33,6 +33,9 @@ export interface ContainMarksSettings {
 	acknowledgeRiskyTokenBehavior: boolean
 	showPageActionButton: boolean
 	enableBookmarkSync: boolean
+	/** When true, newly-created bookmarks with `#cm:` encoding are not auto-stripped.
+	 *  Useful during bookmark import/transfer. Reverts to `false` on every extension startup. */
+	allowEncodedBookmarkImport: boolean
 }
 
 export interface ContainerMappingRecord {
@@ -128,6 +131,9 @@ export interface BookmarksApi {
 	}
 	onChanged: {
 		addListener(listener: (id: string, changeInfo: { url?: string; title?: string }) => void | Promise<void>): void
+	}
+	onCreated: {
+		addListener(listener: (id: string, bookmark: BookmarkNode) => void | Promise<void>): void
 	}
 }
 
