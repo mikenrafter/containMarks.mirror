@@ -238,6 +238,12 @@ function createBrowserMock(options?: {
 				addListener: vi.fn()
 			}
 		},
+		management: {
+			get: vi.fn().mockRejectedValue(new Error('Extension not found'))
+		},
+		runtime: {
+			sendMessage: vi.fn().mockResolvedValue(undefined)
+		},
 		storage: {
 			local: {
 				get: vi.fn().mockImplementation(extensionStorage.get.bind(extensionStorage)),
@@ -1061,5 +1067,77 @@ describe('BackgroundApp', () => {
 			})
 		)
 		expect(browserApi.tabs.remove).toHaveBeenCalledWith(55)
+	})
+
+	/**
+	 * Why this matters: when TC or TC+ is installed, startup must detect it so the "Temporary
+	 * Container" menu item appears. Detection tries both extension IDs in priority order.
+	 */
+	it('detects Temporary Containers extension at startup', async () => {
+		const browserApi = createBrowserMock({
+			containers: [{
+				name: 'Personal', cookieStoreId: 'firefox-container-1',
+				icon: 'fingerprint', color: 'blue', colorCode: '#37adff',
+				iconUrl: 'resource://usercontext-content/fingerprint.svg'
+			}]
+		})
+		// Simulate: stoically TC not installed, but TC+ is
+		vi.mocked(browserApi.management.get).mockImplementation(async (id: string) => {
+			if (id === '{c607c8df-14a7-4f28-894f-29e8722976af}') {
+				throw new Error('Extension not found')
+			}
+			return { id, name: 'Temporary Containers Plus', enabled: true, type: 'extension' }
+		})
+		const app = new BackgroundApp(browserApi, storage, logger, () => 0.5)
+		await app.startup()
+
+		// Should have tried the stoically ID first, then TC+
+		expect(browserApi.management.get).toHaveBeenCalledWith('{c607c8df-14a7-4f28-894f-29e8722976af}')
+		expect(browserApi.management.get).toHaveBeenCalledWith('{1ea2fa75-677e-4702-b06a-50fc7d06fe7e}')
+	})
+
+	/**
+	 * Why this matters: the TC runtime API is the only way to open a URL in a fresh temporary
+	 * container — openInTempContainer must delegate correctly and clean up the source tab.
+	 */
+	it('opens URL via TC API when assigned to temp container', async () => {
+		const browserApi = createBrowserMock({
+			tabs: [{ id: 10, index: 0, url: 'about:blank' }]
+		})
+		// Simulate TC+ detected at startup
+		vi.mocked(browserApi.management.get).mockResolvedValue({
+			id: '{1ea2fa75-677e-4702-b06a-50fc7d06fe7e}',
+			name: 'Temporary Containers Plus', enabled: true, type: 'extension'
+		})
+		vi.mocked(browserApi.runtime.sendMessage).mockResolvedValue({ id: 99 })
+
+		const app = new BackgroundApp(browserApi, storage, logger, () => 0.5)
+		await app.startup()
+		await app.openInContainer('temp-container', 'https://example.com', { id: 10, index: 0 })
+
+		expect(browserApi.runtime.sendMessage).toHaveBeenCalledWith(
+			'{1ea2fa75-677e-4702-b06a-50fc7d06fe7e}',
+			{ method: 'createTabInTempContainer', url: 'https://example.com', active: true }
+		)
+		expect(browserApi.tabs.remove).toHaveBeenCalledWith(10)
+	})
+
+	/**
+	 * Why this matters: if TC is uninstalled or crashes, openInTempContainer must not break —
+	 * it should fall back to opening in the default container rather than leaving the user stuck.
+	 */
+	it('falls back to default tab when no TC extension detected', async () => {
+		const browserApi = createBrowserMock({
+			tabs: [{ id: 10, index: 0, url: 'about:blank' }]
+		})
+		// management.get rejects for all IDs → no TC extension detected
+		const app = new BackgroundApp(browserApi, storage, logger, () => 0.5)
+		await app.openInContainer('temp-container', 'https://example.com', { id: 10, index: 0 })
+
+		expect(browserApi.runtime.sendMessage).not.toHaveBeenCalled()
+		expect(browserApi.tabs.create).toHaveBeenCalledWith(
+			expect.objectContaining({ url: 'https://example.com', index: 1 })
+		)
+		expect(browserApi.tabs.remove).toHaveBeenCalledWith(10)
 	})
 })

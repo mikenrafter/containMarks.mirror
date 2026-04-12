@@ -20,6 +20,7 @@
 		"webNavigation",
 		"webRequest",
 		"webRequestBlocking",
+		"management",
 		"<all_urls>"
 	],
 

@@ -165,7 +165,7 @@ export interface ContextualIdentitiesApi {
 
 export interface TabsApi {
 	TAB_ID_NONE: number
-	create(details: { cookieStoreId: string; url: string; index: number }): Promise<void>
+	create(details: Partial<{ cookieStoreId: string; url: string; index: number }>): Promise<void>
 	remove(tabId: number): Promise<void>
 	get(tabId: number): Promise<Tab>
 	query(queryInfo: { windowId?: number }): Promise<Tab[]>
@@ -235,6 +235,26 @@ export interface WebRequestApi {
 	}
 }
 
+export interface ExtensionInfo {
+	id: string
+	name: string
+	enabled: boolean
+	type: string
+}
+
+/** Subset of browser.management used to detect companion extensions (e.g., Temporary Containers Plus). */
+export interface ManagementApi {
+	get(extensionId: string): Promise<ExtensionInfo>
+}
+
+/**
+ * Subset of browser.runtime used for cross-extension messaging. The sendMessage overload here
+ * targets a specific extension by ID — used to invoke the TC+ API.
+ */
+export interface RuntimeApi {
+	sendMessage(extensionId: string, message: Record<string, unknown>): Promise<unknown>
+}
+
 export interface BrowserApi {
 	bookmarks: BookmarksApi
 	menus: MenusApi
@@ -245,6 +265,8 @@ export interface BrowserApi {
 	pageAction: PageActionApi
 	webNavigation: WebNavigationApi
 	webRequest: WebRequestApi
+	management: ManagementApi
+	runtime: RuntimeApi
 	storage: {
 		local: {
 			get(keys?: string | string[] | Record<string, unknown> | null): Promise<Record<string, unknown>>

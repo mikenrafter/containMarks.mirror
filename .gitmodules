@@ -1,0 +1,6 @@
+[submodule "references/temporary-containers"]
+	path = references/temporary-containers
+	url = https://github.com/GodKratos/temporary-containers.git
+[submodule "references/temporary-containers-stoically"]
+	path = references/temporary-containers-stoically
+	url = https://github.com/stoically/temporary-containers.git

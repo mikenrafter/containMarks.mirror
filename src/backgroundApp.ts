@@ -2,7 +2,20 @@ export const ENABLE_DEBUG_DEFAULT = false
 export const NO_CONTAINER = 'firefox-default'
 export const HOTSWAP_STORAGE_KEY = 'containMarks.hotswaps'
 /** How long to wait before reverting a hotswapped bookmark if no user edit is detected. */
-const HOTSWAP_REVERT_DELAY_MS = 1_000
+const HOTSWAP_REVERT_DELAY_MS = 200
+
+/** Sentinel cookieStoreId stored in mappings to indicate "open in a fresh Temporary Container". */
+export const TEMP_CONTAINER_SENTINEL = 'temp-container'
+
+/**
+ * Gecko extension IDs for both Temporary Containers variants.
+ * The original (stoically) is unmaintained but still widely installed.
+ * TC+ (GodKratos) is the actively-maintained fork with identical API.
+ */
+export const TEMP_CONTAINERS_EXTENSION_IDS = [
+	'{c607c8df-14a7-4f28-894f-29e8722976af}',  // Temporary Containers (stoically)
+	'{1ea2fa75-677e-4702-b06a-50fc7d06fe7e}',  // Temporary Containers Plus (GodKratos)
+] as const
 
 import type {
 	BlockingResponse,
@@ -116,6 +129,10 @@ export class BackgroundApp {
 	 */
 	private readonly hotswapRedirectMap = new Map<string, { containerIndex: number; bookmarkId: string }>()
 
+	/** True when Temporary Containers Plus is installed and enabled — gates the menu item and activation path. */
+	/** Whether TC or TC+ is installed — stores the detected extension ID, or null if neither found. */
+	private tempContainersExtensionId: string | null = null
+
 	public constructor(
 		private readonly browserApi: BrowserApi,
 		private readonly storage: StorageLike,
@@ -151,6 +168,28 @@ export class BackgroundApp {
 	}
 
 	/**
+	 * Checks if either Temporary Containers (stoically) or Temporary Containers Plus (GodKratos)
+	 * is installed and enabled. Tries each known extension ID in priority order (original first).
+	 * Silently swallows errors because neither may be installed — this is a purely additive feature.
+	 */
+	private async detectTempContainersExtension(): Promise<void> {
+		for (const extensionId of TEMP_CONTAINERS_EXTENSION_IDS) {
+			try {
+				const extensionInfo = await this.browserApi.management.get(extensionId)
+				if (extensionInfo.enabled) {
+					this.tempContainersExtensionId = extensionId
+					this.debug('Temporary Containers detected:', extensionInfo.name, extensionId)
+					return
+				}
+			} catch {
+				// Extension not installed — try next
+			}
+		}
+		this.tempContainersExtensionId = null
+		this.debug('No Temporary Containers extension found')
+	}
+
+	/**
 	 * Ordered startup sequence — must run before any bookmark/tab event handling because it
 	 * initializes the mapping store and recovers from crashes. Also auto-reverts the one-session
 	 * `allowEncodedBookmarkImport` bypass so it never persists across restarts.
@@ -159,6 +198,9 @@ export class BackgroundApp {
 		const settings = await this.settings
 		const mappingStore = this.getMappingStore(settings)
 		await mappingStore.initialize()
+
+		// Detect Temporary Containers Plus — gates the "Temporary Container" menu item
+		await this.detectTempContainersExtension()
 
 		// Auto-revert the one-session bypass — always reset on startup
 		if (settings.allowEncodedBookmarkImport) {
@@ -424,6 +466,19 @@ export class BackgroundApp {
 			...(bookmark.type === 'bookmark' && (await selectedContainerIdRequest) === NO_CONTAINER ? { type: 'radio', checked: true } : {})
 		})
 
+		// "Temporary Container" option — only shown when TC or TC+ is installed
+		if (this.tempContainersExtensionId) {
+			this.browserApi.menus.create({
+				id: TEMP_CONTAINER_SENTINEL,
+				title: 'Temporary Container',
+				contexts: ['bookmark'],
+				parentId: this.menuRootId,
+				...(bookmark.type === 'bookmark' && (await selectedContainerIdRequest) === TEMP_CONTAINER_SENTINEL
+					? { type: 'radio', checked: true }
+					: { icons: { 48: 'icons/temp-container.svg' } })
+			})
+		}
+
 		this.browserApi.menus.create({
 			type: 'separator',
 			contexts: ['bookmark'],
@@ -507,6 +562,14 @@ export class BackgroundApp {
 
 			if (cookieStoreId === NO_CONTAINER) {
 				updatedUrl = parsed.url
+			} else if (cookieStoreId === TEMP_CONTAINER_SENTINEL) {
+				// Synthetic identity for "open in fresh Temporary Container via TC API"
+				mapping = await mappingStore.ensureMappingForContainer({
+					cookieStoreId: TEMP_CONTAINER_SENTINEL,
+					name: 'Temporary Container',
+					icon: 'circle',
+					color: 'toolbar'
+				})
 			} else if (cookieStoreId) {
 				const container = await this.getContainer({ cookieStoreId })
 				if (!container) {
@@ -526,6 +589,9 @@ export class BackgroundApp {
 			}
 
 			if (bookmark.url !== updatedUrl) {
+				// Guard against handleBookmarkChanged treating this self-update as a user edit.
+				// Without this, the hotswap late-edit fallback would re-encode with the OLD container.
+				this.selfUpdateBookmarkIds.add(bookmark.id)
 				await this.browserApi.bookmarks.update(bookmark.id, { url: updatedUrl })
 			}
 			return {
@@ -543,7 +609,7 @@ export class BackgroundApp {
 
 	/**
 	 * Recursively applies a container assignment to a bookmark or all bookmarks in a folder.
-	 * Separators are skipped. Each bookmark gets a fresh token via `ensureBookmarkContainerUrl`.
+	 * Separators are skipped. Each bookmark gets a fresh token via `updateBookmarkContainerUrl`.
 	 */
 	public async applyContainer(bookmarks: BookmarkNode[], cookieStoreId: string): Promise<void> {
 		this.debug('apply', bookmarks, cookieStoreId)
@@ -570,6 +636,13 @@ export class BackgroundApp {
 	 */
 	public async openInContainer(cookieStoreId: string, url: string, tab: Tab): Promise<void> {
 		this.debug('open', cookieStoreId, url, tab);
+
+		// Route to TC+ API when the sentinel is used
+		if (cookieStoreId === TEMP_CONTAINER_SENTINEL) {
+			await this.openInTempContainer(url, tab)
+			return
+		}
+
 		try {
 			const container = await this.getContainer({ cookieStoreId: cookieStoreId });
 			if (container === null || tab.id === undefined) {
@@ -584,6 +657,35 @@ export class BackgroundApp {
 			await this.browserApi.tabs.remove(tab.id!);
 		} catch (error) {
 			this.debug(error);
+		}
+	}
+
+	/**
+	 * Opens a URL in a fresh Temporary Container via the TC/TC+ runtime API. Falls back to
+	 * opening in the default container if no TC extension is available or the API call fails.
+	 */
+	private async openInTempContainer(url: string, tab: Tab): Promise<void> {
+		if (tab.id === undefined) return
+
+		const extensionId = this.tempContainersExtensionId
+		try {
+			if (!extensionId) throw new Error('No Temporary Containers extension detected')
+
+			this.debug('openInTempContainer: requesting createTabInTempContainer via', extensionId, url)
+			await this.browserApi.runtime.sendMessage(extensionId, {
+				method: 'createTabInTempContainer',
+				url,
+				active: true
+			})
+			await this.browserApi.tabs.remove(tab.id)
+		} catch (error) {
+			this.debug('openInTempContainer: TC API call failed, falling back', error)
+			try {
+				await this.browserApi.tabs.create({ url, index: tab.index + 1 })
+				await this.browserApi.tabs.remove(tab.id)
+			} catch (fallbackError) {
+				this.debug('openInTempContainer: fallback also failed', fallbackError)
+			}
 		}
 	}
 
@@ -730,12 +832,16 @@ export class BackgroundApp {
 
 			const tab = await this.browserApi.tabs.get(tabId)
 
-			await this.browserApi.tabs.create({
-				cookieStoreId: mapping.cookieStoreId,
-				url: interception.realUrl,
-				index: tab.index + 1
-			})
-			await this.browserApi.tabs.remove(tabId)
+			if (mapping.cookieStoreId === TEMP_CONTAINER_SENTINEL) {
+				await this.openInTempContainer(interception.realUrl, tab)
+			} else {
+				await this.browserApi.tabs.create({
+					cookieStoreId: mapping.cookieStoreId,
+					url: interception.realUrl,
+					index: tab.index + 1
+				})
+				await this.browserApi.tabs.remove(tabId)
+			}
 
 			if (settings.regenerateTokenOnEveryUse) {
 				const bookmarks = await this.browserApi.bookmarks.search(interception.encodedUrl)
@@ -753,6 +859,16 @@ export class BackgroundApp {
 
 	/** Dispatches the selected container assignment when the user clicks a context menu item. */
 	public readonly handleMenuClick = async (info: MenusOnClickInfo): Promise<void> => {
+		// Clear the hotswap late-edit fallback — the user is making an explicit assignment,
+		// not a late edit via Properties. Without this, handleBookmarkChanged would re-encode
+		// the bookmark with the OLD container stored in pendingEditBookmark.
+		this.pendingEditBookmark = null
+
+		// Cancel and clean up the hotswap revert timer — the assignment will produce a new
+		// encoded URL, so the old encoded URL stored in the revert record is now stale.
+		this.cancelHotswapTimer(info.bookmarkId)
+		this.hotswapRecords.delete(info.bookmarkId)
+
 		const bookmark = await this.browserApi.bookmarks.get(info.bookmarkId);
 		this.debug(bookmark);
 		await this.applyContainer(bookmark, info.menuItemId);
