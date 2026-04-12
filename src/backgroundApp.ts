@@ -486,6 +486,28 @@ export class BackgroundApp {
 		})
 
 		const containers = await containerRequest
+
+		// When TC/TC+ is installed, filter out ephemeral temp containers — users should use
+		// the dedicated "Temporary Container" menu item instead of assigning to a specific one.
+		if (this.tempContainersExtensionId) {
+			let i = 0
+			while (i < containers.length) {
+				try {
+					const isTemp = await this.browserApi.runtime.sendMessage(
+						this.tempContainersExtensionId,
+						{ method: 'isTempContainer', cookieStoreId: containers[i]!.cookieStoreId }
+					)
+					if (isTemp) {
+						containers.splice(i, 1)
+					} else {
+						i++
+					}
+				} catch {
+					i++  // Graceful fallback: assume permanent if API fails
+				}
+			}
+		}
+
 		const namesSeen: string[] = []
 		for (const container of containers) {
 			let menuTitle = container.name

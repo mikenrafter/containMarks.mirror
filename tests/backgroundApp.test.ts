@@ -1104,10 +1104,12 @@ describe('BackgroundApp', () => {
 		const browserApi = createBrowserMock({
 			tabs: [{ id: 10, index: 0, url: 'about:blank' }]
 		})
-		// Simulate TC+ detected at startup
-		vi.mocked(browserApi.management.get).mockResolvedValue({
-			id: '{1ea2fa75-677e-4702-b06a-50fc7d06fe7e}',
-			name: 'Temporary Containers Plus', enabled: true, type: 'extension'
+		// Simulate only stoically TC installed (first in priority order)
+		vi.mocked(browserApi.management.get).mockImplementation(async (id: string) => {
+			if (id === '{c607c8df-14a7-4f28-894f-29e8722976af}') {
+				return { id, name: 'Temporary Containers', enabled: true, type: 'extension' }
+			}
+			throw new Error('Extension not found')
 		})
 		vi.mocked(browserApi.runtime.sendMessage).mockResolvedValue({ id: 99 })
 
@@ -1116,7 +1118,7 @@ describe('BackgroundApp', () => {
 		await app.openInContainer('temp-container', 'https://example.com', { id: 10, index: 0 })
 
 		expect(browserApi.runtime.sendMessage).toHaveBeenCalledWith(
-			'{1ea2fa75-677e-4702-b06a-50fc7d06fe7e}',
+			'{c607c8df-14a7-4f28-894f-29e8722976af}',
 			{ method: 'createTabInTempContainer', url: 'https://example.com', active: true }
 		)
 		expect(browserApi.tabs.remove).toHaveBeenCalledWith(10)
