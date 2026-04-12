@@ -81,7 +81,7 @@ function createBrowserMock(options?: {
 	bookmarkByUrl?: Record<string, BookmarkNode[]>
 	bookmarkSearchByTitle?: Record<string, BookmarkNode[]>
 	containers?: ContextualIdentity[]
-	tabs?: Array<{ id: number, index: number, url?: string }>
+	tabs?: Array<{ id: number, index: number, url?: string, cookieStoreId?: string, windowId?: number }>
 }): BrowserApi {
 	const bookmarkById = { ...(options?.bookmarkById ?? {}) }
 	const bookmarkByUrl = options?.bookmarkByUrl ?? {}
@@ -207,6 +207,14 @@ function createBrowserMock(options?: {
 				addListener: vi.fn()
 			},
 			onUpdated: {
+				addListener: vi.fn()
+			},
+			onCreated: {
+				addListener: vi.fn()
+			}
+		},
+		windows: {
+			onCreated: {
 				addListener: vi.fn()
 			}
 		},
@@ -816,5 +824,242 @@ describe('BackgroundApp', () => {
 		const settingsRaw = await browserApi.storage.local.get(['containMarks.settings'])
 		const savedSettings = settingsRaw['containMarks.settings'] as Record<string, unknown>
 		expect(savedSettings.allowEncodedBookmarkImport).toBe(false)
+	})
+
+	/**
+	 * Why this matters: the user opens Properties (hotswap decodes URL), walks away, comes back
+	 * and saves an edit. The revert timer has already fired by then. Without pendingEditBookmark,
+	 * the edit would persist as a clean URL — losing the container assignment silently.
+	 */
+	it('re-encodes late bookmark edits via pendingEditBookmark fallback', async () => {
+		vi.useFakeTimers()
+		const encodedUrl = 'https://example.com#cm:token-123:0'
+		browserApi = createBrowserMock({
+			bookmarkById: {
+				'bm-1': { id: 'bm-1', type: 'bookmark', url: encodedUrl }
+			},
+			containers: [{ cookieStoreId: 'firefox-container-1', name: 'Work', icon: 'fingerprint', color: 'blue' }]
+		})
+
+		const app = new BackgroundApp(browserApi, storage, logger, () => 0.5)
+
+		// 1. Menu shown → hotswap (sets pendingEditBookmark)
+		await app.handleMenuShown({ contexts: ['bookmark'], bookmarkId: 'bm-1' })
+
+		// 2. Menu hidden → starts revert timer
+		await app.handleMenuHidden()
+
+		// 3. Consume the self-update from the hotswap decode
+		await app.handleBookmarkChanged('bm-1', { url: 'https://example.com' })
+
+		// 4. Advance past HOTSWAP_REVERT_DELAY_MS to fire the revert and flush its async chain
+		await vi.advanceTimersByTimeAsync(3000)
+
+		// 5. Consume the self-update from the revert (restores encoded URL)
+		await app.handleBookmarkChanged('bm-1', { url: encodedUrl })
+
+		// 6. User saves a late edit after the revert has completed
+		await app.handleBookmarkChanged('bm-1', { url: 'https://example.com/edited' })
+
+		// Should find a bookmarks.update call that re-encodes the edited URL with container 0
+		const updateCalls = (browserApi.bookmarks.update as ReturnType<typeof vi.fn>).mock.calls
+		const editedCall = updateCalls.find(
+			(call: unknown[]) => {
+				const url = (call[1] as Record<string, string>)?.url
+				return call[0] === 'bm-1' && typeof url === 'string' && url.includes('/edited')
+			}
+		)
+		expect(editedCall).toBeTruthy()
+		expect((editedCall![1] as Record<string, string>).url).toMatch(/^https:\/\/example\.com\/edited#cm:[^:]+:0$/)
+
+		vi.useRealTimers()
+	})
+
+	/**
+	 * Why this matters: clicking "Open in New Tab" from a bookmark's context menu opens the
+	 * decoded URL in the default container (because the bookmark is hotswapped). Without this
+	 * interception, the page loads without the correct container assignment.
+	 */
+	it('intercepts new tabs with hotswapped decoded URLs', async () => {
+		const encodedUrl = 'https://example.com#cm:token-123:0'
+		browserApi = createBrowserMock({
+			bookmarkById: {
+				'bm-1': { id: 'bm-1', type: 'bookmark', url: encodedUrl }
+			},
+			bookmarkByUrl: {
+				[encodedUrl]: [{ id: 'bm-1', type: 'bookmark', url: encodedUrl } as BookmarkNode]
+			},
+			containers: [{ cookieStoreId: 'firefox-container-1', name: 'Work', icon: 'fingerprint', color: 'blue' }]
+		})
+
+		// Set up container mapping so mappingStore.getByIndex(0) resolves
+		const syncFolder = await browserApi.bookmarks.create({
+			parentId: 'menu________',
+			type: 'folder',
+			title: 'ContainMarks Sync'
+		})
+		await browserApi.bookmarks.create({
+			parentId: syncFolder.id,
+			title: 'Mapping: Work',
+			url: 'about:0:firefox-container-1:Work'
+		})
+
+		const app = new BackgroundApp(browserApi, storage, logger, () => 0.5)
+		await app.startup()
+
+		// 1. Menu shown → hotswap
+		await app.handleMenuShown({ contexts: ['bookmark'], bookmarkId: 'bm-1' })
+
+		// 2. Menu hidden → registers pending hotswap URLs
+		await app.handleMenuHidden()
+
+		// 3. Firefox opens "Open in New Tab" with decoded URL in default container
+		await app.handleTabCreated({
+			id: 42,
+			url: 'https://example.com',
+			index: 1,
+			cookieStoreId: 'firefox-default'
+		})
+
+		// Should create a new tab in the correct container
+		expect(browserApi.tabs.create).toHaveBeenCalledWith(
+			expect.objectContaining({
+				cookieStoreId: 'firefox-container-1',
+				url: 'https://example.com'
+			})
+		)
+		// And remove the original tab
+		expect(browserApi.tabs.remove).toHaveBeenCalledWith(42)
+	})
+
+	it('ignores new tabs already in the target container during hotswap window', async () => {
+		const encodedUrl = 'https://example.com#cm:token-123:0'
+		browserApi = createBrowserMock({
+			bookmarkById: {
+				'bm-1': { id: 'bm-1', type: 'bookmark', url: encodedUrl }
+			},
+			containers: [{ cookieStoreId: 'firefox-container-1', name: 'Work', icon: 'fingerprint', color: 'blue' }]
+		})
+
+		const app = new BackgroundApp(browserApi, storage, logger, () => 0.5)
+
+		await app.handleMenuShown({ contexts: ['bookmark'], bookmarkId: 'bm-1' })
+		await app.handleMenuHidden()
+
+		// Tab already in the TARGET container — no redirect needed
+		await app.handleTabCreated({
+			id: 43,
+			url: 'https://example.com',
+			index: 1,
+			cookieStoreId: 'firefox-container-1'
+		})
+
+		expect(browserApi.tabs.create).not.toHaveBeenCalled()
+		expect(browserApi.tabs.remove).not.toHaveBeenCalled()
+	})
+
+	/**
+	 * "Open in New Window" creates a new browser window with a tab navigating to the decoded
+	 * URL. The windows.onCreated handler queries tabs in the new window and redirects matches
+	 * to the correct container.
+	 */
+	it('intercepts Open in New Window during hotswap via handleWindowCreated', async () => {
+		const encodedUrl = 'https://example.com#cm:token-123:0'
+		browserApi = createBrowserMock({
+			bookmarkById: {
+				'bm-1': { id: 'bm-1', type: 'bookmark', url: encodedUrl }
+			},
+			bookmarkByUrl: {
+				[encodedUrl]: [{ id: 'bm-1', type: 'bookmark', url: encodedUrl } as BookmarkNode]
+			},
+			containers: [{ cookieStoreId: 'firefox-container-1', name: 'Work', icon: 'fingerprint', color: 'blue' }]
+		})
+
+		// Set up container mapping store
+		const syncFolder = await browserApi.bookmarks.create({
+			parentId: 'menu________',
+			type: 'folder',
+			title: 'ContainMarks Sync'
+		})
+		await browserApi.bookmarks.create({
+			parentId: syncFolder.id,
+			title: 'Mapping: Work',
+			url: 'about:0:firefox-container-1:Work'
+		})
+
+		const app = new BackgroundApp(browserApi, storage, logger, () => 0.5)
+		await app.startup()
+
+		// Menu shown → hotswap
+		await app.handleMenuShown({ contexts: ['bookmark'], bookmarkId: 'bm-1' })
+		await app.handleMenuHidden()
+
+		// Simulate tabs.query returning the new window's tab with the decoded URL
+		;(browserApi.tabs.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+			{ id: 99, url: 'https://example.com', index: 0, cookieStoreId: 'firefox-default' }
+		])
+
+		// Firefox creates a new window with the decoded URL
+		await app.handleWindowCreated({ id: 10 })
+
+		expect(browserApi.tabs.create).toHaveBeenCalledWith(
+			expect.objectContaining({
+				cookieStoreId: 'firefox-container-1',
+				url: 'https://example.com'
+			})
+		)
+		expect(browserApi.tabs.remove).toHaveBeenCalledWith(99)
+	})
+
+	/**
+	 * When "Open in New Tab/Window" fires during a hotswap, all tab-level events initially
+	 * see `about:blank`. The `webNavigation.onBeforeNavigate` handler is the first event that
+	 * receives the actual URL, so the hotswap redirect is triggered there.
+	 */
+	it('redirects via handleBeforeNavigate when decoded URL is navigated during hotswap', async () => {
+		const encodedUrl = 'https://example.com#cm:token-123:0'
+		browserApi = createBrowserMock({
+			bookmarkById: {
+				'bm-1': { id: 'bm-1', type: 'bookmark', url: encodedUrl }
+			},
+			bookmarkByUrl: {
+				[encodedUrl]: [{ id: 'bm-1', type: 'bookmark', url: encodedUrl } as BookmarkNode]
+			},
+			containers: [{ cookieStoreId: 'firefox-container-1', name: 'Work', icon: 'fingerprint', color: 'blue' }],
+			tabs: [{ id: 55, url: 'about:blank', index: 0, cookieStoreId: 'firefox-default' }]
+		})
+
+		// Set up container mapping store
+		const syncFolder = await browserApi.bookmarks.create({
+			parentId: 'menu________',
+			type: 'folder',
+			title: 'ContainMarks Sync'
+		})
+		await browserApi.bookmarks.create({
+			parentId: syncFolder.id,
+			title: 'Mapping: Work',
+			url: 'about:0:firefox-container-1:Work'
+		})
+
+		const app = new BackgroundApp(browserApi, storage, logger, () => 0.5)
+		await app.startup()
+
+		// Menu shown → hotswap populates pendingHotswapUrls
+		await app.handleMenuShown({ contexts: ['bookmark'], bookmarkId: 'bm-1' })
+		await app.handleMenuHidden()
+
+		// webNavigation.onBeforeNavigate fires with the actual decoded URL
+		app.handleBeforeNavigate({ tabId: 55, url: 'https://example.com', frameId: 0 })
+
+		// Allow the async fire-and-forget redirect to complete
+		await new Promise(resolve => setTimeout(resolve, 0))
+
+		expect(browserApi.tabs.create).toHaveBeenCalledWith(
+			expect.objectContaining({
+				cookieStoreId: 'firefox-container-1',
+				url: 'https://example.com'
+			})
+		)
+		expect(browserApi.tabs.remove).toHaveBeenCalledWith(55)
 	})
 })

@@ -91,6 +91,12 @@ export interface Tab {
 	index: number
 	title?: string
 	cookieStoreId?: string
+	windowId?: number
+}
+
+export interface Window {
+	id?: number
+	tabs?: Tab[]
 }
 
 export interface MenusCreateDetails {
@@ -162,13 +168,22 @@ export interface TabsApi {
 	create(details: { cookieStoreId: string; url: string; index: number }): Promise<void>
 	remove(tabId: number): Promise<void>
 	get(tabId: number): Promise<Tab>
-	query(queryInfo: Record<string, never>): Promise<Tab[]>
+	query(queryInfo: { windowId?: number }): Promise<Tab[]>
 	highlight(details: { populate: boolean; tabs: number[] }): Promise<void>
 	onActivated: {
 		addListener(listener: (activeInfo: TabActivatedInfo) => void | Promise<void>): void
 	}
 	onUpdated: {
 		addListener(listener: (id: number, changeInfo: TabChangeInfo, tab: Tab) => void | Promise<void>): void
+	}
+	onCreated: {
+		addListener(listener: (tab: Tab) => void | Promise<void>): void
+	}
+}
+
+export interface WindowsApi {
+	onCreated: {
+		addListener(listener: (window: Window) => void | Promise<void>): void
 	}
 }
 
@@ -225,6 +240,7 @@ export interface BrowserApi {
 	menus: MenusApi
 	contextualIdentities: ContextualIdentitiesApi
 	tabs: TabsApi
+	windows: WindowsApi
 	notifications: NotificationsApi
 	pageAction: PageActionApi
 	webNavigation: WebNavigationApi

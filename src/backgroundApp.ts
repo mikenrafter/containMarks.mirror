@@ -66,13 +66,20 @@ interface PendingInterception {
  * or when the user saves edits. Crash-safe via storage persistence.
  */
 export class BackgroundApp {
+	/** Debug mode is suppressed during `initialize()` to avoid startup noise in the console. */
 	public enableDebug = ENABLE_DEBUG_DEFAULT
+
+	/** Prevents duplicate menu registration when context menus are rebuilt on bookmark changes. */
 	private contextMenuItemsCreated = false
 	private readonly menuRootId = 'assign_container'
+
+	/** Lazily loaded once — avoids re-reading storage on every operation that needs settings. */
 	private get settings(): Promise<ContainMarksSettings> {
 		return loadSettings(this.browserApi)
 	}
+	/** Container mappings backed by synced bookmarks — works across devices. */
 	private readonly syncMappingStore: ContainerMappingStore
+	/** Container mappings backed by local bookmarks — device-specific, faster. */
 	private readonly localMappingStore: ContainerMappingStore
 
 	/**
@@ -90,7 +97,24 @@ export class BackgroundApp {
 	/** Bookmark IDs whose next onChanged event is a self-update (decode or revert) to ignore. */
 	private readonly selfUpdateBookmarkIds = new Set<string>()
 
+	/** Revert timers keyed by bookmark ID — cancelled if user edits arrive before expiry. */
 	private readonly hotswapRevertTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+	/**
+	 * The bookmark from the most recent menu-shown hotswap. Used by `handleBookmarkChanged`
+	 * to catch late user edits that arrive after the revert timer fires — e.g. the user opens
+	 * Properties, waits, then saves. Cleared on the next `handleMenuShown` call.
+	 */
+	private pendingEditBookmark: { id: string; containerIndex: number } | null = null
+
+	/**
+	 * Decoded URLs of currently-hotswapped bookmarks, mapped to their container assignment.
+	 * Populated eagerly in `handleMenuShown` (and redundantly in `handleMenuHidden`); consumed
+	 * by `handleBeforeNavigate`, `handleTabCreated`, `handleWindowCreated`, and `handleTabUpdated`
+	 * to intercept "Open in New Tab/Window" clicks that launch the decoded URL outside the
+	 * assigned container. Cleared when revert timers fire.
+	 */
+	private readonly pendingHotswapUrls = new Map<string, { containerIndex: number; bookmarkId: string }>()
 
 	public constructor(
 		private readonly browserApi: BrowserApi,
@@ -110,6 +134,11 @@ export class BackgroundApp {
 
 
 
+	/**
+	 * Bootstrap entry point — called once at extension load. Suppresses debug logging during
+	 * startup to keep the console clean, then re-enables it. Fires startup, menu creation,
+	 * and listener registration concurrently since they're independent.
+	 */
 	public initialize(): void {
 		const realDebug = this.enableDebug
 		this.enableDebug = false
@@ -121,6 +150,11 @@ export class BackgroundApp {
 		this.registerListeners()
 	}
 
+	/**
+	 * Ordered startup sequence — must run before any bookmark/tab event handling because it
+	 * initializes the mapping store and recovers from crashes. Also auto-reverts the one-session
+	 * `allowEncodedBookmarkImport` bypass so it never persists across restarts.
+	 */
 	public async startup(): Promise<void> {
 		const settings = await this.settings
 		const mappingStore = this.getMappingStore(settings)
@@ -141,6 +175,11 @@ export class BackgroundApp {
 		}
 	}
 
+	/**
+	 * One-time migration from the original `localStorage`-based container mapping to the current
+	 * bookmark-based mapping store. Reads and deletes each legacy key, then re-encodes the
+	 * bookmark URL with the new mapping index.
+	 */
 	private async migrateLegacyStorage(mappingStore: ContainerMappingStore): Promise<void> {
 		for (const key of listStorageKeys(this.storage)) {
 			const reference = readLegacyReference(this.storage, key)
@@ -197,6 +236,10 @@ export class BackgroundApp {
 		}
 	}
 
+	/**
+	 * Security feature: regenerates all bookmark tokens on startup when `resetTokensOnStartup`
+	 * is enabled. Prevents token-based URL prediction by ensuring tokens change every session.
+	 */
 	private async refreshTokensOnStartup(mappingStore: ContainerMappingStore): Promise<void> {
 		const legacyBookmarks = await this.browserApi.bookmarks.search({ query: `${PREFIX}${DELIMITER}` })
 		const fragmentBookmarks = await this.browserApi.bookmarks.search({ query: `#${FRAGMENT_PREFIX}${DELIMITER}` })
@@ -223,6 +266,7 @@ export class BackgroundApp {
 
 	// --- Hotswap crash recovery ---
 
+	/** Persists hotswap state to `storage.local` so crash recovery can restore encoded URLs. */
 	private async persistHotswapRecords(): Promise<void> {
 		const records: Record<string, HotswapRecord> = {}
 		for (const [id, record] of this.hotswapRecords) {
@@ -261,6 +305,7 @@ export class BackgroundApp {
 		await this.browserApi.storage.local.set({ [HOTSWAP_STORAGE_KEY]: {} })
 	}
 
+	/** Prevents a stale revert from overwriting a user edit that arrived before the timer fired. */
 	private cancelHotswapTimer(bookmarkId: string): void {
 		const timer = this.hotswapRevertTimers.get(bookmarkId)
 		if (timer) {
@@ -269,6 +314,10 @@ export class BackgroundApp {
 		}
 	}
 
+	/**
+	 * Restores the original encoded URL after the hotswap window expires without a user edit.
+	 * Also cleans up the pendingHotswapUrls entry and persists the updated state.
+	 */
 	private async revertHotswap(bookmarkId: string, record: HotswapRecord): Promise<void> {
 		try {
 			this.hotswapRevertTimers.delete(bookmarkId)
@@ -284,10 +333,12 @@ export class BackgroundApp {
 
 	// --- Core helpers ---
 
+	/** Routes to sync or local mapping store based on user preference. */
 	private getMappingStore(settings: ContainMarksSettings): ContainerMappingStore {
 		return settings.enableBookmarkSync ? this.syncMappingStore : this.localMappingStore
 	}
 
+	/** Ensures the page-action button reflects the current `showPageActionButton` setting across all tabs. */
 	private async syncPageActionVisibilityForAllTabs(settings: ContainMarksSettings): Promise<void> {
 		const tabs = await this.browserApi.tabs.query({})
 		for (const tab of tabs) {
@@ -297,6 +348,7 @@ export class BackgroundApp {
 		}
 	}
 
+	/** Shows or hides the page-action icon for a single tab — called on tab switch and startup. */
 	private async syncPageActionVisibilityForTab(tabId: number, settings?: ContainMarksSettings): Promise<void> {
 		const activeSettings = settings ?? await this.settings
 		this.debug('pageAction visibility', { tabId, showPageActionButton: activeSettings.showPageActionButton })
@@ -308,6 +360,7 @@ export class BackgroundApp {
 		await this.browserApi.pageAction.hide(tabId)
 	}
 
+	/** Tears down and recreates all menu items — needed when container assignments change. */
 	private async rebuildMenuItems(bookmark: Pick<BookmarkNode, 'type' | 'id'> = { type: '', id: '' }): Promise<void> {
 		if (this.contextMenuItemsCreated) {
 			this.browserApi.menus.removeAll()
@@ -318,6 +371,7 @@ export class BackgroundApp {
 		this.contextMenuItemsCreated = true
 	}
 
+	/** Resolves the currently-assigned container for a bookmark to pre-select the menu radio button. */
 	private async getSelectedMenuContainerId(bookmark: Pick<BookmarkNode, 'type' | 'url'>): Promise<string | null> {
 		if (bookmark.type !== 'bookmark') {
 			return null
@@ -339,6 +393,11 @@ export class BackgroundApp {
 		return mapping.cookieStoreId
 	}
 
+	/**
+	 * Builds the "Assign Bookmark to Container" context menu tree. Fetches containers and the
+	 * bookmark's current assignment in parallel for speed. Duplicate container names are
+	 * disambiguated with the cookieStoreId suffix.
+	 */
 	public async createMenuItems(bookmark: Pick<BookmarkNode, 'type' | 'id' | 'url'> = { type: '', id: '' }): Promise<void> {
 		// handle things asynchronously for speed
 		const containerRequest = this.browserApi.contextualIdentities.query({})
@@ -395,6 +454,11 @@ export class BackgroundApp {
 		this.browserApi.menus.refresh()
 	}
 
+	/**
+	 * Resolves a container identity by cookieStoreId or backupName. The backupName fallback
+	 * enables cross-device sync: when a container ID differs between devices, the human-readable
+	 * name can still resolve the correct container.
+	 */
 	public async getContainer(query: {cookieStoreId?: string | null, backupName?: string | null}): Promise<ContextualIdentity | null> {
 		const { cookieStoreId, backupName } = query
 		this.debug('getContainer', backupName, cookieStoreId)
@@ -477,6 +541,10 @@ export class BackgroundApp {
 		}
 	}
 
+	/**
+	 * Recursively applies a container assignment to a bookmark or all bookmarks in a folder.
+	 * Separators are skipped. Each bookmark gets a fresh token via `ensureBookmarkContainerUrl`.
+	 */
 	public async applyContainer(bookmarks: BookmarkNode[], cookieStoreId: string): Promise<void> {
 		this.debug('apply', bookmarks, cookieStoreId)
 		for (const bookmark of bookmarks) {
@@ -496,6 +564,10 @@ export class BackgroundApp {
 		}
 	}
 
+	/**
+	 * Creates a new tab in the specified container, positioned after the source tab, then closes
+	 * the source tab. This is the core redirect mechanism used by all interception paths.
+	 */
 	public async openInContainer(cookieStoreId: string, url: string, tab: Tab): Promise<void> {
 		this.debug('open', cookieStoreId, url, tab);
 		try {
@@ -509,22 +581,103 @@ export class BackgroundApp {
 				url: url,
 				index: tab.index + 1
 			});
-			await this.browserApi.tabs.remove(tab.id);
+			await this.browserApi.tabs.remove(tab.id!);
 		} catch (error) {
 			this.debug(error);
+		}
+	}
+
+	/**
+	 * Async redirect for a tab whose navigation matched a `pendingHotswapUrls` entry. Resolves
+	 * the container mapping and reopens the URL in the correct container. Called fire-and-forget
+	 * from the synchronous `handleBeforeNavigate`.
+	 */
+	private async redirectHotswappedTab(tabId: number, url: string, containerIndex: number): Promise<void> {
+		try {
+			const tab = await this.browserApi.tabs.get(tabId)
+			const settings = await this.settings
+			const mappingStore = this.getMappingStore(settings)
+			await mappingStore.initialize()
+
+			const mapping = mappingStore.getByIndex(containerIndex)
+			this.debug('redirectHotswappedTab: mapping', { containerIndex, mapping, tabCookieStoreId: tab.cookieStoreId })
+			if (!mapping) return
+
+			if (tab.cookieStoreId === mapping.cookieStoreId) {
+				this.debug('redirectHotswappedTab: already in target container, skipping')
+				return
+			}
+
+			this.debug('redirectHotswappedTab: redirecting tab', tabId, 'to container', mapping.cookieStoreId)
+			await this.openInContainer(mapping.cookieStoreId, url, tab)
+
+			// Temporary Containers addons may race our redirect and create an orphaned
+			// about:blank tab in the same window. Wait briefly, then close any about:blank
+			// tabs in that window that aren't the tab we just created.
+			if (tab.windowId) {
+				await this.cleanupOrphanedTabs(tab.windowId, mapping.cookieStoreId)
+			}
+		} catch (error) {
+			this.debug('redirectHotswappedTab: error', error)
+		}
+	}
+
+	/**
+	 * After a hotswap redirect, Temporary Containers addons may create an orphaned `about:blank`
+	 * tab in the same window as a replacement for the tab we just removed. This method waits
+	 * briefly for the orphan to appear, then closes any `about:blank` tabs in the window that
+	 * aren't in the target container.
+	 */
+	private async cleanupOrphanedTabs(windowId: number, targetCookieStoreId: string): Promise<void> {
+		// Brief delay to let the Temporary Containers addon create its replacement tab
+		await new Promise(resolve => setTimeout(resolve, 150))
+
+		try {
+			const tabs = await this.browserApi.tabs.query({ windowId })
+			for (const tab of tabs) {
+				const isOrphan = tab.url === 'about:blank'
+					&& tab.cookieStoreId !== NO_CONTAINER
+					&& tab.cookieStoreId !== targetCookieStoreId
+					&& tab.id !== undefined
+
+				if (isOrphan) {
+					this.debug('cleanupOrphanedTabs: removing orphaned tab', tab.id, tab.cookieStoreId)
+					await this.browserApi.tabs.remove(tab.id!)
+				}
+			}
+		} catch (error) {
+			this.debug('cleanupOrphanedTabs: error', error)
 		}
 	}
 
 	// --- Request interception (fragment-encoded bookmark navigation) ---
 
 	/**
-	 * MUST be fully synchronous — no awaits. Populates `pendingInterceptions` so that the
-	 * subsequent `onBeforeRequest` handler can cancel the HTTP request before any network activity.
+	 * MUST be fully synchronous for the fragment-encoded path — no awaits. Populates
+	 * `pendingInterceptions` so that the subsequent `onBeforeRequest` handler can cancel the
+	 * HTTP request before any network activity.
+	 *
+	 * Also handles hotswap interception: when a navigation targets a decoded URL that's in
+	 * `pendingHotswapUrls` (from "Open in New Tab/Window" during a hotswap), it fires off an
+	 * async redirect. This reliably catches navigations that `tabs.onCreated`/`onUpdated` miss
+	 * because they initially see `about:blank`.
 	 *
 	 * Only processes top-level frame navigations (`frameId === 0`).
 	 */
 	public readonly handleBeforeNavigate = (details: WebNavigationBeforeNavigateDetails): void => {
 		if (details.frameId !== 0) return
+
+		// Hotswap interception — async fire-and-forget redirect for decoded bookmark URLs
+		if (this.pendingHotswapUrls.size > 0) {
+			const hotswapInfo = this.pendingHotswapUrls.get(details.url)
+			if (hotswapInfo) {
+				this.debug('handleBeforeNavigate: hotswap match', details.url, '→ container', hotswapInfo.containerIndex)
+				this.pendingHotswapUrls.delete(details.url)
+				void this.redirectHotswappedTab(details.tabId, details.url, hotswapInfo.containerIndex)
+				return
+			}
+		}
+
 		if (!isFragmentEncodedUrl(details.url)) return
 
 		const parsed = parseBookmarkUrl(details.url)
@@ -550,12 +703,19 @@ export class BackgroundApp {
 		const interception = this.pendingInterceptions.get(details.tabId)
 		if (!interception) return
 
-		this.pendingInterceptions.delete(details.tabId)
-		void this.executeInterception(details.tabId, interception)
+		// fire and forget for rapid response
+		setTimeout(async () => {
+			this.pendingInterceptions.delete(details.tabId)
+			void this.executeInterception(details.tabId, interception);
+		}, 0);
 
 		return { cancel: true }
 	}
 
+	/**
+	 * Completes the async portion of the two-phase request interception: resolves the container
+	 * mapping from the bookmark's index and opens the real URL in the correct container.
+	 */
 	private async executeInterception(tabId: number, interception: PendingInterception): Promise<void> {
 		try {
 			const settings = await this.settings
@@ -591,6 +751,7 @@ export class BackgroundApp {
 
 	// --- Menu event handlers ---
 
+	/** Dispatches the selected container assignment when the user clicks a context menu item. */
 	public readonly handleMenuClick = async (info: MenusOnClickInfo): Promise<void> => {
 		const bookmark = await this.browserApi.bookmarks.get(info.bookmarkId);
 		this.debug(bookmark);
@@ -600,8 +761,12 @@ export class BackgroundApp {
 	/**
 	 * Rebuilds context-menu radio items to reflect the bookmark's container assignment, then
 	 * hotswaps the bookmark URL so the native Properties dialog shows the clean (decoded) URL.
+	 * Sets `pendingEditBookmarkId` to catch late user edits after the revert timer fires.
 	 */
 	public readonly handleMenuShown = async (info: MenusOnShownInfo): Promise<void> => {
+		// Clear previous pending edit — a new menu open supersedes the old one
+		this.pendingEditBookmark = null
+
 		try {
 			if (info.contexts.includes('bookmark') && info.bookmarkId) {
 				const bookmark = (await this.browserApi.bookmarks.get(info.bookmarkId))[0]
@@ -622,9 +787,19 @@ export class BackgroundApp {
 								encodedUrl: bookmark.url,
 								containerIndex: parsed.containerIndex
 							})
+							this.pendingEditBookmark = { id: bookmark.id, containerIndex: parsed.containerIndex }
 							await this.persistHotswapRecords()
 
 							const realUrl = decodeToRealUrl(bookmark.url)
+
+							// Eagerly register the decoded URL so new-tab interception works even
+							// if the tab is created before handleMenuHidden fires.
+							this.pendingHotswapUrls.set(realUrl, {
+								containerIndex: parsed.containerIndex,
+								bookmarkId: bookmark.id
+							})
+							this.debug('handleMenuShown: registered pendingHotswapUrl', realUrl, '→ container', parsed.containerIndex)
+
 							this.selfUpdateBookmarkIds.add(bookmark.id)
 							await this.browserApi.bookmarks.update(bookmark.id, { url: realUrl })
 						}
@@ -639,12 +814,23 @@ export class BackgroundApp {
 	/**
 	 * Starts revert timers for all currently-hotswapped bookmarks. If no user edit arrives
 	 * via `handleBookmarkChanged` before the timer fires, the encoding is restored.
+	 *
+	 * Also populates `pendingHotswapUrls` so that `handleTabCreated` can intercept "Open in
+	 * New Tab" clicks that launch the decoded (clean) URL outside any container.
 	 */
 	public readonly handleMenuHidden = async (): Promise<void> => {
 		for (const [bookmarkId, record] of this.hotswapRecords) {
 			if (this.hotswapRevertTimers.has(bookmarkId)) continue
 
+			// Register the decoded URL for new-tab interception
+			const decodedUrl = decodeToRealUrl(record.encodedUrl)
+			this.pendingHotswapUrls.set(decodedUrl, {
+				containerIndex: record.containerIndex,
+				bookmarkId
+			})
+
 			const timer = setTimeout(() => {
+				this.pendingHotswapUrls.delete(decodedUrl)
 				void this.revertHotswap(bookmarkId, record)
 			}, HOTSWAP_REVERT_DELAY_MS)
 			this.hotswapRevertTimers.set(bookmarkId, timer)
@@ -655,6 +841,9 @@ export class BackgroundApp {
 	 * Detects user edits to hotswapped bookmarks. Self-updates (from our own decode/revert)
 	 * are filtered via `selfUpdateBookmarkIds`. Real user edits trigger re-encoding with the
 	 * same container assignment and a fresh token.
+	 *
+	 * Falls back to `pendingEditBookmark` for late edits that arrive after the revert timer
+	 * has already restored the encoding — e.g. user opens Properties, waits, then saves.
 	 */
 	public readonly handleBookmarkChanged = async (id: string, changeInfo: { url?: string; title?: string }): Promise<void> => {
 		if (this.selfUpdateBookmarkIds.has(id)) {
@@ -662,20 +851,37 @@ export class BackgroundApp {
 			return
 		}
 
+		if (!changeInfo.url) return
+
+		// Primary path: bookmark is still in the hotswap window
 		const record = this.hotswapRecords.get(id)
-		if (!record || !changeInfo.url) return
+		if (record) {
+			try {
+				this.cancelHotswapTimer(id)
+				this.hotswapRecords.delete(id)
+				await this.persistHotswapRecords()
 
-		try {
-			this.cancelHotswapTimer(id)
-			this.hotswapRecords.delete(id)
-			await this.persistHotswapRecords()
+				const newEncodedUrl = getNewUrl({ seed: this.randomValue }, record.containerIndex, changeInfo.url)
+				this.selfUpdateBookmarkIds.add(id)
+				await this.browserApi.bookmarks.update(id, { url: newEncodedUrl })
+			} catch (error) {
+				this.debug(error)
+			}
+			return
+		}
 
-			// Re-encode the (possibly edited) URL with the same container
-			const newEncodedUrl = getNewUrl({ seed: this.randomValue }, record.containerIndex, changeInfo.url)
-			this.selfUpdateBookmarkIds.add(id)
-			await this.browserApi.bookmarks.update(id, { url: newEncodedUrl })
-		} catch (error) {
-			this.debug(error)
+		// Fallback: late edit after revert timer already fired
+		if (this.pendingEditBookmark && this.pendingEditBookmark.id === id) {
+			const { containerIndex } = this.pendingEditBookmark
+			this.pendingEditBookmark = null
+
+			try {
+				const newEncodedUrl = getNewUrl({ seed: this.randomValue }, containerIndex, changeInfo.url)
+				this.selfUpdateBookmarkIds.add(id)
+				await this.browserApi.bookmarks.update(id, { url: newEncodedUrl })
+			} catch (error) {
+				this.debug(error)
+			}
 		}
 	}
 
@@ -722,6 +928,98 @@ export class BackgroundApp {
 	// --- Tab event handlers ---
 
 	/**
+	 * Intercepts "Open in New Tab" clicks during a hotswap window. When a user right-clicks a
+	 * container bookmark and chooses "Open in New Tab", Firefox opens the decoded (clean) URL
+	 * outside the correct container because the bookmark was temporarily hotswapped. This handler
+	 * compares newly-created tab URLs against `pendingHotswapUrls` and reopens matches in the
+	 * correct container.
+	 *
+	 * Skips tabs that are already in the target container to avoid redundant redirects.
+	 * Compatible with Temporary Containers addons that assign non-default cookieStoreIds.
+	 */
+	public readonly handleTabCreated = async (tab: Tab): Promise<void> => {
+		this.debug('handleTabCreated', { url: tab.url, id: tab.id, cookieStoreId: tab.cookieStoreId, pendingCount: this.pendingHotswapUrls.size, pendingUrls: [...this.pendingHotswapUrls.keys()] })
+		if (this.pendingHotswapUrls.size === 0) return
+		if (!tab.url || !tab.id) {
+			this.debug('handleTabCreated: skipped — no url or id', { url: tab.url, id: tab.id })
+			return
+		}
+
+		const hotswapInfo = this.pendingHotswapUrls.get(tab.url)
+		if (!hotswapInfo) {
+			this.debug('handleTabCreated: no pending hotswap match for', tab.url)
+			return
+		}
+
+		try {
+			const settings = await this.settings
+			const mappingStore = this.getMappingStore(settings)
+			await mappingStore.initialize()
+
+			const mapping = mappingStore.getByIndex(hotswapInfo.containerIndex)
+			this.debug('handleTabCreated: mapping lookup', { containerIndex: hotswapInfo.containerIndex, mapping, tabCookieStoreId: tab.cookieStoreId })
+			if (!mapping) return
+
+			// Already in the correct container — no redirect needed
+			if (tab.cookieStoreId === mapping.cookieStoreId) {
+				this.debug('handleTabCreated: already in target container, skipping')
+				return
+			}
+
+			this.debug('handleTabCreated: redirecting tab', tab.id, 'to container', mapping.cookieStoreId)
+			this.pendingHotswapUrls.delete(tab.url)
+			await this.openInContainer(mapping.cookieStoreId, tab.url, tab)
+		} catch (error) {
+			this.debug('handleTabCreated: error', error)
+		}
+	}
+
+	/**
+	 * Insurance handler for "Open in New Window" during a hotswap. Firefox's `tabs.onCreated`
+	 * and `tabs.onUpdated` may not fire reliably for tabs in newly-created windows. This handler
+	 * queries tabs in the new window and checks their URLs against `pendingHotswapUrls`.
+	 */
+	public readonly handleWindowCreated = async (window: import('./models').Window): Promise<void> => {
+		this.debug('handleWindowCreated', { windowId: window.id, pendingCount: this.pendingHotswapUrls.size, pendingUrls: [...this.pendingHotswapUrls.keys()] })
+		if (this.pendingHotswapUrls.size === 0) return
+		if (!window.id) return
+
+		try {
+			const tabs = await this.browserApi.tabs.query({ windowId: window.id })
+			this.debug('handleWindowCreated: tabs in window', window.id, tabs.map(t => ({ id: t.id, url: t.url, cookieStoreId: t.cookieStoreId })))
+
+			for (const tab of tabs) {
+				const url = tab.url
+				if (!url || !tab.id) continue
+
+				const hotswapInfo = this.pendingHotswapUrls.get(url)
+				if (!hotswapInfo) {
+					this.debug('handleWindowCreated: no pending hotswap match for', url)
+					continue
+				}
+
+				const settings = await this.settings
+				const mappingStore = this.getMappingStore(settings)
+				await mappingStore.initialize()
+
+				const mapping = mappingStore.getByIndex(hotswapInfo.containerIndex)
+				this.debug('handleWindowCreated: mapping lookup', { containerIndex: hotswapInfo.containerIndex, mapping, tabCookieStoreId: tab.cookieStoreId })
+				if (!mapping) continue
+				if (tab.cookieStoreId === mapping.cookieStoreId) {
+					this.debug('handleWindowCreated: already in target container, skipping')
+					continue
+				}
+
+				this.debug('handleWindowCreated: redirecting tab', tab.id, 'to container', mapping.cookieStoreId)
+				this.pendingHotswapUrls.delete(url)
+				await this.openInContainer(mapping.cookieStoreId, url, tab)
+			}
+		} catch (error) {
+			this.debug('handleWindowCreated: error', error)
+		}
+	}
+
+	/**
 	 * Fallback interception path for cases where `onBeforeRequest` didn't fire — e.g. same-page
 	 * fragment navigations where no HTTP request is made. Also handles legacy `about:` encoded
 	 * bookmarks that aren't intercepted by the webRequest pipeline.
@@ -732,6 +1030,36 @@ export class BackgroundApp {
 		}
 
 		const currentUrl = tab.url ?? change.url ?? ''
+
+		// Check if this tab navigated to a hotswapped decoded URL ("Open in New Tab" during
+		// hotswap). Skips tabs already in the target container. Compatible with Temporary
+		// Containers addons that assign non-default cookieStoreIds to new tabs.
+		if (currentUrl && this.pendingHotswapUrls.size > 0) {
+			this.debug('handleTabUpdated: hotswap check', { tabId: id, currentUrl, cookieStoreId: tab.cookieStoreId, pendingUrls: [...this.pendingHotswapUrls.keys()] })
+			const hotswapInfo = this.pendingHotswapUrls.get(currentUrl)
+			if (hotswapInfo && tab.id !== undefined) {
+				try {
+					const settings = await this.settings
+					const mappingStore = this.getMappingStore(settings)
+					await mappingStore.initialize()
+					const mapping = mappingStore.getByIndex(hotswapInfo.containerIndex)
+					this.debug('handleTabUpdated: hotswap mapping', { containerIndex: hotswapInfo.containerIndex, mapping, tabCookieStoreId: tab.cookieStoreId })
+					if (mapping && tab.cookieStoreId !== mapping.cookieStoreId) {
+						this.debug('handleTabUpdated: redirecting tab', id, 'to container', mapping.cookieStoreId)
+						this.pendingHotswapUrls.delete(currentUrl)
+						await this.openInContainer(mapping.cookieStoreId, currentUrl, tab)
+						return
+					} else if (mapping) {
+						this.debug('handleTabUpdated: already in target container, skipping')
+					}
+				} catch (error) {
+					this.debug('handleTabUpdated: hotswap error', error)
+				}
+			} else if (!hotswapInfo) {
+				this.debug('handleTabUpdated: no pending hotswap match for', currentUrl)
+			}
+		}
+
 		if (id === this.browserApi.tabs.TAB_ID_NONE || !isPrefixedUrl(currentUrl)) {
 			return
 		}
@@ -769,6 +1097,7 @@ export class BackgroundApp {
 		}
 	}
 
+	/** Updates page-action visibility when the user switches to a different tab. */
 	public readonly handleTabActivated = async (activeInfo: { tabId: number }): Promise<void> => {
 		try {
 			if (activeInfo.tabId !== this.browserApi.tabs.TAB_ID_NONE) {
@@ -834,12 +1163,15 @@ export class BackgroundApp {
 		}
 	}
 
+	/** Wires all browser event listeners. Called once during `initialize()`. */
 	private registerListeners(): void {
 		this.browserApi.menus.onClicked.addListener(this.handleMenuClick)
 		this.browserApi.menus.onShown.addListener(this.handleMenuShown)
 		this.browserApi.menus.onHidden.addListener(this.handleMenuHidden)
 		this.browserApi.tabs.onUpdated.addListener(this.handleTabUpdated)
 		this.browserApi.tabs.onActivated.addListener(this.handleTabActivated)
+		this.browserApi.tabs.onCreated.addListener(this.handleTabCreated)
+		this.browserApi.windows.onCreated.addListener(this.handleWindowCreated)
 		this.browserApi.pageAction.onClicked.addListener(this.handlePageActionClicked)
 		this.browserApi.bookmarks.onChanged.addListener(this.handleBookmarkChanged)
 		this.browserApi.bookmarks.onCreated.addListener(this.handleBookmarkCreated)
