@@ -125,6 +125,7 @@ function createMockDeps(overrides: Partial<TabExecutionControllerDeps> = {}): {
 			return { cookieStoreId, name: `Container ${cookieStoreId}`, icon: 'circle' as const, color: 'blue' as const }
 		}),
 		updateBookmarkContainerUrl: vi.fn().mockResolvedValue(null),
+		isTempContainer: vi.fn().mockResolvedValue(false),
 		...overrides,
 	}
 
@@ -336,33 +337,18 @@ describe('TabExecutionControllerImpl', () => {
 	})
 
 	describe('isTempContainer', () => {
-		it('returns false when no TC extension is installed', async () => {
-			const { deps } = createMockDeps()
-			const tec = new TabExecutionControllerImpl(deps)
-
-			expect(await tec.isTempContainer('firefox-container-1')).toBe(false)
-		})
-
-		it('returns true when TC API confirms temporary', async () => {
-			const tcExtId = '{tc-ext}'
-			const { deps, browserApi } = createMockDeps({
-				tempContainersExtensionId: vi.fn().mockReturnValue(tcExtId),
+		it('delegates to deps.isTempContainer', async () => {
+			const { deps } = createMockDeps({
+				isTempContainer: vi.fn().mockResolvedValue(true),
 			})
-			;(browserApi.runtime.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue(true)
 			const tec = new TabExecutionControllerImpl(deps)
 
 			expect(await tec.isTempContainer('firefox-container-42')).toBe(true)
-			expect(browserApi.runtime.sendMessage).toHaveBeenCalledWith(tcExtId, {
-				method: 'isTempContainer',
-				cookieStoreId: 'firefox-container-42',
-			})
+			expect(deps.isTempContainer).toHaveBeenCalledWith('firefox-container-42')
 		})
 
-		it('returns false when TC API throws', async () => {
-			const { deps, browserApi } = createMockDeps({
-				tempContainersExtensionId: vi.fn().mockReturnValue('{tc-ext}'),
-			})
-			;(browserApi.runtime.sendMessage as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('API error'))
+		it('returns false when deps returns false', async () => {
+			const { deps } = createMockDeps()
 			const tec = new TabExecutionControllerImpl(deps)
 
 			expect(await tec.isTempContainer('firefox-container-1')).toBe(false)
@@ -445,11 +431,9 @@ describe('TabExecutionControllerImpl', () => {
 		})
 
 		it('assigns TEMP_CONTAINER_SENTINEL when tab is in a temp container', async () => {
-			const tcExtId = '{tc-ext}'
 			const { deps, browserApi } = createMockDeps({
-				tempContainersExtensionId: vi.fn().mockReturnValue(tcExtId),
+				isTempContainer: vi.fn().mockResolvedValue(true),
 			})
-			;(browserApi.runtime.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue(true)
 			const tec = new TabExecutionControllerImpl(deps)
 			const tab = makeTab({ cookieStoreId: 'firefox-tmp-42', url: 'https://temp-page.com', title: 'Temp Page' })
 

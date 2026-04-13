@@ -294,3 +294,13 @@ After each step, `npm run typecheck && npm test` must remain green. BackgroundAp
 - `evaluateTabNavigation`: fallback path for fragment changes and legacy about: URLs
 - `evaluateHotswapRedirect`: hotswap redirect evaluation for tab/window creation events
 - Added `onIntentResolved` callback to deps for async-to-sync bridge
+
+### Step 3 progress: BookmarkAssignmentManager — DONE
+- `BookmarkAssignmentManagerImpl` implemented in `src/background/bookmarkAssignmentManager.ts`
+- 27 tests in `tests/bookmarkAssignmentManager.test.ts` — all pass
+- Owns: hotswap lifecycle, context menu build, container assignment, bookmark event handlers
+- `isTempContainer()` centralized in BAM (canonical home for TC extension knowledge), injected into TEC via deps
+- `getContainer`, `updateBookmarkContainerUrl`, `applyContainer` exposed for TEC injection
+- `hotswapRedirectMap` exposed as read-only for NPE injection
+- Hotswap revert timer tested with fake timers to verify actual revert behavior
+- Self-update tracking tested end-to-end through handleMenuShown → handleBookmarkChanged sequence

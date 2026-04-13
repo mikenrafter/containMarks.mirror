@@ -48,6 +48,8 @@ export interface TabExecutionControllerDeps {
 	getContainer(query: { cookieStoreId?: string | null; backupName?: string | null }): Promise<ContextualIdentity | null>
 	/** Encodes/refreshes a bookmark's container URL. Injected from BAM. */
 	updateBookmarkContainerUrl(bookmark: BookmarkNode, cookieStoreId?: string | null): Promise<BookmarkReference | null>
+	/** Checks whether a cookieStoreId belongs to an ephemeral Temporary Container. Injected from BAM. */
+	isTempContainer(cookieStoreId: string): Promise<boolean>
 }
 
 /**
@@ -226,16 +228,7 @@ export class TabExecutionControllerImpl implements TabExecutionController {
 	}
 
 	async isTempContainer(cookieStoreId: string): Promise<boolean> {
-		const extensionId = this.deps.tempContainersExtensionId()
-		if (!extensionId) return false
-		try {
-			return await this.browserApi.runtime.sendMessage(
-				extensionId,
-				{ method: 'isTempContainer', cookieStoreId }
-			) as boolean
-		} catch {
-			return false
-		}
+		return this.deps.isTempContainer(cookieStoreId)
 	}
 
 	async syncPageActionVisibilityForTab(tabId: number): Promise<void> {
