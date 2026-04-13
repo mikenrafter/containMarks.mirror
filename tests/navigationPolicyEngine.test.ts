@@ -118,6 +118,11 @@ function createMockDeps(overrides: Partial<NavigationPolicyEngineDeps> = {}): {
 		}),
 		mappingStore: vi.fn().mockReturnValue(mappingStore),
 		hotswapRedirectMap: () => hotswapMap,
+		consumeHotswapRedirect: (url: string) => {
+			const info = hotswapMap.get(url)
+			if (info) hotswapMap.delete(url)
+			return info
+		},
 		onIntentResolved: vi.fn(),
 		...overrides,
 	}

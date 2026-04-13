@@ -77,6 +77,13 @@ export interface BookmarkAssignmentManager {
 	/** Read-only view of decoded URLs awaiting new-tab interception during hotswap. */
 	readonly hotswapRedirectMap: ReadonlyMap<string, HotswapRedirectInfo>
 
+	/**
+	 * Atomically lookup and remove a hotswap redirect entry. Returns the entry if found,
+	 * or undefined if the URL was not in the map. Prevents duplicate redirects when
+	 * multiple handlers (webNavigation, tabUpdated, tabCreated) race to consume the same entry.
+	 */
+	consumeHotswapRedirect(url: string): HotswapRedirectInfo | undefined
+
 	/** Extension ID of detected TC/TC+ addon, or null if neither is installed. */
 	readonly tempContainersExtensionId: string | null
 
@@ -155,6 +162,14 @@ export class BookmarkAssignmentManagerImpl implements BookmarkAssignmentManager 
 
 	get hotswapRedirectMap(): ReadonlyMap<string, HotswapRedirectInfo> {
 		return this._hotswapRedirectMap
+	}
+
+	consumeHotswapRedirect(url: string): HotswapRedirectInfo | undefined {
+		const info = this._hotswapRedirectMap.get(url)
+		if (info) {
+			this._hotswapRedirectMap.delete(url)
+		}
+		return info
 	}
 
 	get tempContainersExtensionId(): string | null {

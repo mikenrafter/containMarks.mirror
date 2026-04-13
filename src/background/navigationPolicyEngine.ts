@@ -54,6 +54,8 @@ export interface NavigationPolicyEngineDeps {
 	mappingStore(settings: ContainMarksSettings): ContainerMappingStore
 	/** Read-only access to the hotswap redirect map owned by BookmarkAssignmentManager. */
 	hotswapRedirectMap(): ReadonlyMap<string, HotswapRedirectInfo>
+	/** Atomically consume a hotswap redirect entry. Returns the entry if found, undefined otherwise. */
+	consumeHotswapRedirect(url: string): HotswapRedirectInfo | undefined
 	/**
 	 * Callback invoked when an async intent is resolved from a synchronous interception path
 	 * (webRequest cancel → async mapping resolution). The runtime wires this to TEC.executeIntent.
@@ -136,7 +138,7 @@ export class NavigationPolicyEngineImpl implements NavigationPolicyEngine {
 		// Hotswap interception — fire-and-forget async redirect for decoded bookmark URLs
 		const hotswapMap = this.deps.hotswapRedirectMap()
 		if (hotswapMap.size > 0) {
-			const hotswapInfo = hotswapMap.get(details.url)
+			const hotswapInfo = this.deps.consumeHotswapRedirect(details.url)
 			if (hotswapInfo) {
 				this.debug('handleBeforeNavigate: hotswap match', details.url, '→ container', hotswapInfo.containerIndex)
 				// Resolve async — intent flows to TEC via onIntentResolved
@@ -261,10 +263,7 @@ export class NavigationPolicyEngineImpl implements NavigationPolicyEngine {
 	}
 
 	async evaluateHotswapRedirect(url: string, tab: Tab): Promise<NavigationIntent> {
-		const hotswapMap = this.deps.hotswapRedirectMap()
-		if (hotswapMap.size === 0) return NOOP
-
-		const hotswapInfo = hotswapMap.get(url)
+		const hotswapInfo = this.deps.consumeHotswapRedirect(url)
 		if (!hotswapInfo) return NOOP
 
 		return this.resolveHotswapMapping(url, hotswapInfo.containerIndex, tab)
