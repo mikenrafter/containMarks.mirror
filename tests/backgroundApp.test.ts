@@ -223,6 +223,8 @@ function createBrowserMock(options?: {
 			create: vi.fn().mockResolvedValue('notification-id')
 		},
 		pageAction: {
+			isShown: vi.fn().mockResolvedValue(false),
+			setTitle: vi.fn().mockResolvedValue(undefined),
 			show: vi.fn().mockResolvedValue(undefined),
 			hide: vi.fn().mockResolvedValue(undefined),
 			onClicked: {

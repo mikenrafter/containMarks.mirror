@@ -269,3 +269,18 @@ Each step: implement module class, move methods, update tests, typecheck+test.
 
 ### Key constraint
 After each step, `npm run typecheck && npm test` must remain green. BackgroundApp continues to exist and work throughout; methods are extracted one module at a time, with BackgroundApp delegating to the new module where extraction is complete.
+
+### Step 1 progress: TabExecutionController — DONE
+- `TabExecutionControllerImpl` implemented in `src/background/tabExecutionController.ts`
+- 24 tests in `tests/tabExecutionController.test.ts` — all pass
+- Added `isShown`, `setTitle` to `PageActionApi` in `models.ts`
+- Added `isTempContainer` method (queries TC/TC+ API, graceful fallback)
+- Page action visibility: `isShown` short-circuit prevents flicker
+- `cleanupOrphanedTabs`: pre-delay snapshot excludes pre-existing tabs
+- `handlePageActionClicked`: temp container tabs → `TEMP_CONTAINER_SENTINEL` assignment
+- `syncPageActionVisibilityForAllTabs`: per-tab dynamic title ("Bookmark this page in ...")
+
+#### HUMAN TODOs (require manual runtime testing)
+1. **cleanupOrphanedTabs exclusion guard** — The pre-delay snapshot prevents removing pre-existing about:blank tabs. Trade-off: if TC creates the orphan before our snapshot (rare race), we miss it. Needs integration testing with TC installed.
+2. **syncPageActionVisibilityForTab flicker** — The `isShown` short-circuit should prevent flicker, but needs visual confirmation in Firefox during rapid tab switching.
+3. **handlePageActionClicked temp container** — When tab is in an ephemeral TC container, we assign to `TEMP_CONTAINER_SENTINEL` instead of the specific ephemeral cookieStoreId. Verify with TC installed that the bookmark opens correctly in a fresh temp container.

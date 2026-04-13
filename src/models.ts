@@ -197,6 +197,8 @@ export interface NotificationsApi {
 }
 
 export interface PageActionApi {
+	isShown(request: { tabId: number }): Promise<boolean>
+	setTitle(details: { tabId: number; title: string }): Promise<void>
 	show(tabId: number): Promise<void>
 	hide(tabId: number): Promise<void>
 	onClicked: {
