@@ -284,3 +284,13 @@ After each step, `npm run typecheck && npm test` must remain green. BackgroundAp
 1. **cleanupOrphanedTabs exclusion guard** — The pre-delay snapshot prevents removing pre-existing about:blank tabs. Trade-off: if TC creates the orphan before our snapshot (rare race), we miss it. Needs integration testing with TC installed.
 2. **syncPageActionVisibilityForTab flicker** — The `isShown` short-circuit should prevent flicker, but needs visual confirmation in Firefox during rapid tab switching.
 3. **handlePageActionClicked temp container** — When tab is in an ephemeral TC container, we assign to `TEMP_CONTAINER_SENTINEL` instead of the specific ephemeral cookieStoreId. Verify with TC installed that the bookmark opens correctly in a fresh temp container.
+
+### Step 2 progress: NavigationPolicyEngine — DONE
+- `NavigationPolicyEngineImpl` implemented in `src/background/navigationPolicyEngine.ts`
+- 20 tests in `tests/navigationPolicyEngine.test.ts` — all pass
+- `handleBeforeNavigate`: sync detection of fragment-encoded URLs + hotswap matches
+- `handleBeforeRequest`: sync cancel + async intent resolution via `onIntentResolved` callback
+- `resolveInterception`: maps interception → NavigationIntent (redirect/redirect-temp/reset-token/noop)
+- `evaluateTabNavigation`: fallback path for fragment changes and legacy about: URLs
+- `evaluateHotswapRedirect`: hotswap redirect evaluation for tab/window creation events
+- Added `onIntentResolved` callback to deps for async-to-sync bridge
