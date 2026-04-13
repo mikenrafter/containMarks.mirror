@@ -4,7 +4,7 @@
 
 This plan has advanced beyond the original baseline. Current verified state:
 
-- Tests: 94/94 passing
+- Tests: 105/105 passing
 - Typecheck: clean
 - Build: clean (`build:firefox:xpi` succeeds)
 
@@ -26,6 +26,12 @@ This plan has advanced beyond the original baseline. Current verified state:
   - Direct-to-current migration functions: `migrateFromBetaToCurrent`, `migrateFromV100ToCurrent`, `migrateFromV110ToCurrent`
   - Legacy storage helpers renamed and moved to urlCodec
   - `BookmarkTokenSource` moved to `models.ts`
+- Phase E: done
+  - Migration UX with orphan warning on sync toggle
+  - Auto-trigger dialog when `enableBookmarkSync` checkbox changes
+  - Three actions: Cancel and revert / Reset N bookmark(s) / Overwrite {target} mappings
+  - `scanOrphanedBookmarks` and `resetOrphanedBookmarks` in `src/mappingMigration.ts`
+  - Helpers extracted to testable module (no DOM dependency)
 
 ### Additional completed scope (not in original phase table)
 
@@ -35,13 +41,8 @@ This plan has advanced beyond the original baseline. Current verified state:
   - API-driven open flow (`createTabInTempContainer`)
   - Container assignment menu now filters ephemeral temp containers (graceful fallback if API is unavailable)
 
-### Recommended next phase
-
-- Phase E (#7): local/sync migration UX with orphan warning
-
 ### Still pending
 
-- Phase E (#7): local/sync migration UX with orphan warning
 - Phase F (#9): back-button loop mitigation (deferred design)
 
 ## Overview
@@ -179,7 +180,7 @@ Candidate approach: track recently-intercepted tab IDs with a short TTL.
 | B | #3 (creation-time strip + bypass setting) | None — security | done |
 | C | #5 (sync cache), #6 (poll evaluation) | None — performance | done via interception/event hardening |
 | D | #8 (urlCodec module extraction) | After A+B stabilize codecs | done |
-| E | #7 (orphan migration UX) | After D stabilizes module boundaries |
+| E | #7 (orphan migration UX) | After D stabilizes module boundaries | done |
 | F | #9 (back button loop) | After real-world testing with temp container addons |
 
 Phases A–C are independent and can be parallelized. D depends on A+B. E depends on D.
