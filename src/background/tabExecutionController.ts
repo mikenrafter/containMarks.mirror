@@ -235,15 +235,25 @@ export class TabExecutionControllerImpl implements TabExecutionController {
 		// Short-circuit via isShown to avoid redundant show/hide calls (prevents visual flicker).
         // HUMAN TODO: ensure this doesn't flicker
 		const settings = await this.deps.settings()
-		this.debug('pageAction visibility', { tabId, showPageActionButton: settings.showPageActionButton })
-        const shown = await this.browserApi.pageAction.isShown({tabId: tabId})
-		if (settings.showPageActionButton == shown) return;
+        const tab = await this.browserApi.tabs.get(tabId)
 
-        if (settings.showPageActionButton) {
-			await this.browserApi.pageAction.show(tabId)
-			return
-		}
-		await this.browserApi.pageAction.hide(tabId)
+        this.debug('pageAction visibility', { tabId, showPageActionButton: settings.showPageActionButton })
+        const shown = await this.browserApi.pageAction.isShown({ tabId })
+        const desiredState = settings.showPageActionButton && tab.cookieStoreId !== NO_CONTAINER && tab.cookieStoreId !== null
+
+        if (desiredState && !shown) {
+            await this.browserApi.pageAction.show(tabId)
+        } else if (!desiredState && shown) {
+            await this.browserApi.pageAction.hide(tabId)
+        }
+
+        if (desiredState) {
+            const isTempContainer = await this.isTempContainer(tab.cookieStoreId ?? '')
+            const containerSnippet = isTempContainer
+                ? 'a Temporary Container'
+                : 'the ' + await this.browserApi.contextualIdentities.get(tab.cookieStoreId as string).then(container => container.name) + ' container';
+            await this.browserApi.pageAction.setTitle({ tabId, title: `Bookmark this page in ${containerSnippet}` })
+        }
 	}
 
 	async syncPageActionVisibilityForAllTabs(): Promise<void> {
@@ -251,26 +261,7 @@ export class TabExecutionControllerImpl implements TabExecutionController {
 		const tabs = await this.browserApi.tabs.query({})
 		for (const tab of tabs) {
 			if (tab.id === undefined) continue;
-            const tabId = tab.id as number;
-            setTimeout(async () => {
-				this.debug('pageAction visibility', { tabId, showPageActionButton: settings.showPageActionButton })
-                const shown = await this.browserApi.pageAction.isShown({ tabId })
-                const desiredState = settings.showPageActionButton && tab.cookieStoreId !== NO_CONTAINER && tab.cookieStoreId !== null
-
-				if (desiredState && !shown) {
-					await this.browserApi.pageAction.show(tabId)
-				} else if (!desiredState && shown) {
-					await this.browserApi.pageAction.hide(tabId)
-				}
-
-                if (desiredState) {
-                    const isTempContainer = await this.isTempContainer(tab.cookieStoreId ?? '')
-                    const containerSnippet = isTempContainer
-                        ? 'a Temporary Container'
-                        : 'the ' + await this.browserApi.contextualIdentities.get(tab.cookieStoreId as string).then(container => container.name) + ' container';
-                    await this.browserApi.pageAction.setTitle({ tabId, title: `Bookmark this page in ${containerSnippet}` })
-                }
-			}, 0)
+            setTimeout(() => this.syncPageActionVisibilityForTab(tab.id as number), 0)
 		}
 	}
 

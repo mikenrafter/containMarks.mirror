@@ -50,8 +50,7 @@
 			"96":  "icons/icon-mini.svg",
 			"128": "icons/icon-mini.svg"
 		},
-		"default_title": "Bookmark this URL inside this container.",
-		"show_matches": ["<all_urls>"]
+		"default_title": "Bookmark this URL inside this container."
 	},
 
 	"browser_specific_settings": {
