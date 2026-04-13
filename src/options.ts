@@ -1,14 +1,17 @@
 import { DEFAULT_SETTINGS, hasRiskyTokenBehavior, loadSettings, saveSettings } from './settings'
 import {
-	LOCAL_MAPPING_STORAGE_KEY,
 	SYNC_FOLDER_PARENT_ID,
-	SYNC_FOLDER_TITLE,
-	buildContainerMappingUrl,
-	buildMappingTitle,
-	parseContainerMappingBookmark,
-	parseMappingRecord
+	SYNC_FOLDER_TITLE
 } from './containerMappings'
-import type { BookmarkNode, BrowserApi, ContainerMappingRecord, ContainMarksSettings } from './models'
+import {
+	readSyncedMappings,
+	readLocalMappings,
+	writeLocalMappings,
+	overwriteSyncedMappings,
+	scanOrphanedBookmarks,
+	resetOrphanedBookmarks
+} from './mappingMigration'
+import type { BookmarkNode, BrowserApi, ContainMarksSettings } from './models'
 
 const RISK_LINK = 'https://gitlab.com/mikenrafter/containmarks#security'
 
@@ -59,95 +62,6 @@ async function getFolderOptions(browserApi: BrowserApi): Promise<FolderOption[]>
 	return options.sort((left, right) => left.label.localeCompare(right.label))
 }
 
-function normalizeMappingRecords(records: ContainerMappingRecord[]): ContainerMappingRecord[] {
-	const byIndex = new Map<number, ContainerMappingRecord>()
-	for (const record of records) {
-		byIndex.set(record.firstSeenIndex, record)
-	}
-
-	return [...byIndex.values()].sort((left, right) => left.firstSeenIndex - right.firstSeenIndex)
-}
-
-async function listSyncFolders(browserApi: BrowserApi): Promise<BookmarkNode[]> {
-	const folders = await browserApi.bookmarks.search({ title: SYNC_FOLDER_TITLE })
-	return folders.filter((node) => node.type === 'folder' && isSyncFolderAtOfficialPath(node))
-}
-
-async function readSyncedMappings(browserApi: BrowserApi): Promise<ContainerMappingRecord[]> {
-	const folders = await listSyncFolders(browserApi)
-	const records: ContainerMappingRecord[] = []
-
-	for (const folder of folders) {
-		const children = await browserApi.bookmarks.getChildren(folder.id)
-		for (const child of children) {
-			const parsed = parseContainerMappingBookmark(child)
-			if (parsed) {
-				records.push(parsed)
-			}
-		}
-	}
-
-	return normalizeMappingRecords(records)
-}
-
-async function readLocalMappings(browserApi: BrowserApi): Promise<ContainerMappingRecord[]> {
-	const payload = await browserApi.storage.local.get(LOCAL_MAPPING_STORAGE_KEY)
-	const rawValue = payload[LOCAL_MAPPING_STORAGE_KEY]
-	if (!Array.isArray(rawValue)) {
-		return []
-	}
-
-	const records = rawValue.map(parseMappingRecord).filter((record): record is ContainerMappingRecord => record !== null)
-	return normalizeMappingRecords(records)
-}
-
-async function writeLocalMappings(browserApi: BrowserApi, records: ContainerMappingRecord[]): Promise<void> {
-	await browserApi.storage.local.set({ [LOCAL_MAPPING_STORAGE_KEY]: normalizeMappingRecords(records) })
-}
-
-async function overwriteSyncedMappings(browserApi: BrowserApi, records: ContainerMappingRecord[]): Promise<void> {
-	const syncFolders = await listSyncFolders(browserApi)
-
-	for (const folder of syncFolders) {
-		const children = await browserApi.bookmarks.getChildren(folder.id)
-		for (const child of children) {
-			if (parseContainerMappingBookmark(child)) {
-				await browserApi.bookmarks.remove(child.id)
-			}
-		}
-	}
-
-	let targetFolder = syncFolders[0]
-	if (!targetFolder) {
-		targetFolder = await browserApi.bookmarks.create({
-			parentId: SYNC_FOLDER_PARENT_ID,
-			type: 'folder',
-			title: SYNC_FOLDER_TITLE
-		})
-	}
-
-	for (const record of normalizeMappingRecords(records)) {
-		await browserApi.bookmarks.create({
-			parentId: targetFolder.id,
-			title: buildMappingTitle(record.backupName),
-			url: buildContainerMappingUrl(record)
-		})
-	}
-}
-
-function updateMappingTransferUi(formDirty: boolean): void {
-	const syncEnabled = getElementById<HTMLInputElement>('enable-bookmark-sync').checked
-	const sourceLabel = syncEnabled ? 'local' : 'synced'
-	const targetLabel = syncEnabled ? 'synced' : 'local'
-	const transferButton = getElementById<HTMLButtonElement>('translate-mappings-button')
-
-	transferButton.textContent = `Overwrite ${targetLabel} mappings with ${sourceLabel} mappings`
-	getElementById<HTMLElement>('translate-target-label').textContent = targetLabel
-	getElementById<HTMLElement>('translate-source-label').textContent = sourceLabel
-
-	transferButton.disabled = formDirty
-	transferButton.title = formDirty ? 'Save settings first to enable this action.' : ''
-}
 
 function getElementById<TElement extends HTMLElement>(id: string): TElement {
 	const element = document.getElementById(id)
@@ -207,6 +121,107 @@ function updateRiskGating(): void {
 	regenInput.disabled = true
 }
 
+/**
+ * Migration result from the sync-toggle dialog. Each outcome maps to a distinct user action:
+ * - `cancelled`: User dismissed dialog — revert checkbox to previous state, no save.
+ * - `stripped`: User chose to strip orphaned bookmarks and proceed with the toggle.
+ * - `overwritten`: User chose to overwrite target mappings and proceed with the toggle.
+ */
+type MigrationOutcome = 'cancelled' | 'reset' | 'overwritten'
+
+/**
+ * Shows the migration dialog when the user toggles `enableBookmarkSync`.
+ *
+ * Scans for orphaned bookmarks (encoded with indices that don't resolve in the target store),
+ * presents a preview of source mappings, and offers three choices:
+ * - Cancel and revert the toggle
+ * - Strip encoding from orphaned bookmarks, then proceed
+ * - Overwrite target store with source mappings, then proceed
+ *
+ * Returns the chosen outcome so the caller can decide whether to save settings.
+ */
+async function showMigrationDialog(browserApi: BrowserApi, switchingToSync: boolean): Promise<MigrationOutcome> {
+	const sourceLabel = switchingToSync ? 'local' : 'synced'
+	const targetLabel = switchingToSync ? 'synced' : 'local'
+	const capitalSourceLabel = switchingToSync ? 'Local' : 'Synced'
+
+	const sourceRecords = switchingToSync
+		? await readLocalMappings(browserApi)
+		: await readSyncedMappings(browserApi)
+
+	const targetRecords = switchingToSync
+		? await readSyncedMappings(browserApi)
+		: await readLocalMappings(browserApi)
+
+	const orphans = await scanOrphanedBookmarks(browserApi, targetRecords)
+
+	// Populate dialog
+	const mappingNoun = sourceRecords.length === 1 ? 'mapping' : 'mappings'
+	getElementById<HTMLElement>('migrate-description').textContent =
+		`Switching from ${sourceLabel} to ${targetLabel} storage.`
+
+	const orphanWarning = getElementById<HTMLElement>('migrate-orphan-warning')
+	const resetButton = getElementById<HTMLButtonElement>('migrate-reset')
+
+	if (orphans.length > 0) {
+		orphanWarning.style.display = ''
+		getElementById<HTMLElement>('migrate-orphan-count').textContent = String(orphans.length)
+		resetButton.style.display = ''
+		resetButton.textContent = `Reset ${orphans.length} bookmark(s)`
+	} else {
+		orphanWarning.style.display = 'none'
+		resetButton.style.display = 'none'
+	}
+
+	const previewList = getElementById<HTMLUListElement>('migrate-records-preview')
+	previewList.innerHTML = ''
+	if (sourceRecords.length === 0) {
+		getElementById<HTMLElement>('migrate-records-heading').textContent = `${capitalSourceLabel} has no mappings to transfer.`
+	} else {
+		getElementById<HTMLElement>('migrate-records-heading').textContent = `${capitalSourceLabel} has ${sourceRecords.length} ${mappingNoun}:`
+		for (const record of sourceRecords) {
+			const listItem = document.createElement('li')
+			listItem.textContent = `#${record.firstSeenIndex}: ${record.backupName} (${record.cookieStoreId})`
+			previewList.appendChild(listItem)
+		}
+	}
+
+	const dialog = getElementById<HTMLDialogElement>('migrate-mappings-dialog')
+	getElementById<HTMLButtonElement>('migrate-overwrite').textContent = `Overwrite ${targetLabel} mappings`
+
+	return new Promise<MigrationOutcome>((resolve) => {
+		function cleanup() {
+			getElementById('migrate-cancel').removeEventListener('click', onCancel)
+			getElementById('migrate-reset').removeEventListener('click', onStrip)
+			getElementById('migrate-overwrite').removeEventListener('click', onOverwrite)
+			dialog.close()
+		}
+
+		function onCancel() { cleanup(); resolve('cancelled') }
+
+		async function onStrip() {
+			cleanup()
+			await resetOrphanedBookmarks(browserApi, orphans)
+			resolve('reset')
+		}
+
+		async function onOverwrite() {
+			cleanup()
+			if (switchingToSync) {
+				await overwriteSyncedMappings(browserApi, sourceRecords)
+			} else {
+				await writeLocalMappings(browserApi, sourceRecords)
+			}
+			resolve('overwritten')
+		}
+
+		getElementById('migrate-cancel').addEventListener('click', onCancel)
+		getElementById('migrate-reset').addEventListener('click', onStrip)
+		getElementById('migrate-overwrite').addEventListener('click', onOverwrite)
+		dialog.showModal()
+	})
+}
+
 async function initializeOptionsPage(browserApi: BrowserApi): Promise<void> {
 	const riskLink = getElementById<HTMLAnchorElement>('risk-link')
 	riskLink.href = RISK_LINK
@@ -228,61 +243,45 @@ async function initializeOptionsPage(browserApi: BrowserApi): Promise<void> {
 	})
 	updateRiskGating()
 
-	let formDirty = false
-	updateMappingTransferUi(formDirty)
+	/** Tracks the last-saved value of `enableBookmarkSync` so the dialog can revert on cancel. */
+	let savedSyncEnabled = settings.enableBookmarkSync
 
 	getElementById<HTMLFormElement>('options-form').addEventListener('change', () => {
-		formDirty = true
 		updateRiskGating()
-		updateMappingTransferUi(formDirty)
 	})
 
-	getElementById<HTMLButtonElement>('translate-mappings-button').addEventListener('click', async () => {
-		try {
-			const syncEnabled = getElementById<HTMLInputElement>('enable-bookmark-sync').checked
-			const sourceRecords = syncEnabled
-				? await readLocalMappings(browserApi)
-				: await readSyncedMappings(browserApi)
+	/**
+	 * Auto-trigger migration dialog when the sync checkbox changes.
+	 * On cancel, reverts the checkbox to its previous saved state without saving.
+	 */
+	getElementById<HTMLInputElement>('enable-bookmark-sync').addEventListener('change', async (event) => {
+		const checkbox = event.target as HTMLInputElement
+		const switchingToSync = checkbox.checked
 
-			const previewList = getElementById<HTMLUListElement>('confirm-transfer-preview')
-			previewList.innerHTML = ''
-			if (sourceRecords.length === 0) {
-				const li = document.createElement('li')
-				li.textContent = '(no records to transfer)'
-				previewList.appendChild(li)
-			} else {
-				for (const record of sourceRecords) {
-					const li = document.createElement('li')
-					li.textContent = `${record.firstSeenIndex}: ${record.backupName}`
-					previewList.appendChild(li)
-				}
+		try {
+			const outcome = await showMigrationDialog(browserApi, switchingToSync)
+
+			if (outcome === 'cancelled') {
+				checkbox.checked = savedSyncEnabled
+				setStatus('Migration cancelled.')
+				return
 			}
 
-			const dialog = getElementById<HTMLDialogElement>('confirm-transfer-dialog')
-			const confirmed = await new Promise<boolean>((resolve) => {
-				const onCancel = () => { cleanup(); resolve(false) }
-				const onOk = () => { cleanup(); resolve(true) }
-				const cleanup = () => {
-					getElementById('confirm-transfer-cancel').removeEventListener('click', onCancel)
-					getElementById('confirm-transfer-ok').removeEventListener('click', onOk)
-					dialog.close()
-				}
-				getElementById('confirm-transfer-cancel').addEventListener('click', onCancel)
-				getElementById('confirm-transfer-ok').addEventListener('click', onOk)
-				dialog.showModal()
-			})
+			// Save the settings with the new sync toggle value
+			const formValues = readFormValues()
+			const saved = await saveSettings(browserApi, formValues)
+			writeFormValues(saved)
+			updateRiskGating()
+			savedSyncEnabled = saved.enableBookmarkSync
 
-			if (!confirmed) return
-
-			if (syncEnabled) {
-				await overwriteSyncedMappings(browserApi, sourceRecords)
-				setStatus(`Overwrote synced mappings with ${sourceRecords.length} local record(s).`)
+			if (outcome === 'reset') {
+				setStatus('Switched storage mode and reset orphaned bookmarks.')
 			} else {
-				await writeLocalMappings(browserApi, sourceRecords)
-				setStatus(`Overwrote local mappings with ${sourceRecords.length} synced record(s).`)
+				setStatus('Switched storage mode and overwrote target mappings.')
 			}
 		} catch (error) {
-			setStatus(`Failed to translate mappings: ${String(error)}`, true)
+			checkbox.checked = savedSyncEnabled
+			setStatus(`Migration failed: ${String(error)}`, true)
 		}
 	})
 
@@ -292,8 +291,7 @@ async function initializeOptionsPage(browserApi: BrowserApi): Promise<void> {
 			const saved = await saveSettings(browserApi, readFormValues())
 			writeFormValues(saved)
 			updateRiskGating()
-			formDirty = false
-			updateMappingTransferUi(formDirty)
+			savedSyncEnabled = saved.enableBookmarkSync
 			setStatus(hasRiskyTokenBehavior(saved) ? 'Saved with custom token retention settings.' : 'Saved.')
 		} catch (error) {
 			setStatus(`Failed to save settings: ${String(error)}`, true)
@@ -301,4 +299,6 @@ async function initializeOptionsPage(browserApi: BrowserApi): Promise<void> {
 	})
 }
 
-void initializeOptionsPage(globalThis.browser)
+if (typeof document !== 'undefined') {
+	void initializeOptionsPage(globalThis.browser)
+}

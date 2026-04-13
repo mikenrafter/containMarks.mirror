@@ -112,11 +112,6 @@
 						<input type="checkbox" id="enable-bookmark-sync" checked />
 						Enable bookmark synchronization across devices
 					</label>
-					<button type="button" id="translate-mappings-button"></button>
-					<p id="translate-mappings-description">
-						This will OVERWRITE the <strong id="translate-target-label"></strong> container mappings, but will not erase the
-						<strong id="translate-source-label"></strong> container mappings.
-					</p>
 				</fieldset>
 
 				<button type="submit">Save Settings</button>
@@ -124,13 +119,18 @@
 			</form>
 		</main>
 		<script src="options.js"></script>
-		<dialog id="confirm-transfer-dialog">
-			<h2>Overwrite container mappings?</h2>
-			<p>This cannot be undone. The final mappings will be:</p>
-			<ul id="confirm-transfer-preview"></ul>
+		<dialog id="migrate-mappings-dialog">
+			<h2>Migrate container mappings</h2>
+			<p id="migrate-description"></p>
+			<div id="migrate-orphan-warning" style="display:none">
+				<p><strong id="migrate-orphan-count"></strong> encoded bookmark(s) reference containers that don't exist in the target store.</p>
+			</div>
+			<p id="migrate-records-heading">Mappings to transfer:</p>
+			<ul id="migrate-records-preview"></ul>
 			<menu>
-				<button id="confirm-transfer-cancel" type="button">Cancel</button>
-				<button id="confirm-transfer-ok" type="button" class="overwrite">Overwrite</button>
+				<button id="migrate-cancel" type="button">Cancel and revert</button>
+				<button id="migrate-reset" type="button" style="display:none">Reset orphaned bookmarks</button>
+				<button id="migrate-overwrite" type="button" class="overwrite">Overwrite old mappings</button>
 			</menu>
 		</dialog>
 	</body>
