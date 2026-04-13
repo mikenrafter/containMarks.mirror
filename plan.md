@@ -185,3 +185,87 @@ Candidate approach: track recently-intercepted tab IDs with a short TTL.
 
 Phases A–C are independent and can be parallelized. D depends on A+B. E depends on D.
 F is deferred until design is finalized.
+
+---
+
+## Phase G: backgroundApp.ts Module Extraction
+
+### Architecture
+- **BookmarkAssignmentManager** (BAM): menu, assignment, hotswap lifecycle
+- **NavigationPolicyEngine** (NPE): all redirect decisions → NavigationIntent
+- **TabExecutionController** (TEC): tab/window side-effects, page action
+- **ContainMarksRuntime** (CMR): wiring, startup, migration (replaces BackgroundApp)
+
+Interface skeletons: `src/background/{bookmarkAssignmentManager,navigationPolicyEngine,tabExecutionController,containMarksRuntime}.ts`
+Shared types added to `src/models.ts`: `NavigationIntent`, `HotswapRecord`, `PendingInterception`, `HotswapRedirectInfo`
+
+### Extraction order (dependency-safe)
+
+Each step: implement module class, move methods, update tests, typecheck+test.
+
+#### Step 1: TabExecutionController (leaf — no other module depends on it)
+| Method | Line | Notes |
+|--------|------|-------|
+| `openInContainer` | 660 | Core redirect primitive |
+| `openInTempContainer` | 690 | TC extension delegation |
+| `redirectHotswappedTab` | 720 | Resolve index → cookieStoreId, delegate to openInContainer |
+| `cleanupOrphanedTabs` | 756 | Post-redirect about:blank cleanup |
+| `syncPageActionVisibilityForTab` | 395 | Show/hide page action |
+| `syncPageActionVisibilityForAllTabs` | 385 | Iterate all tabs |
+| `handlePageActionClicked` | 1257 | Quick-bookmark + assign |
+| New: `executeIntent` | — | Switch on NavigationIntent, dispatch to above methods |
+
+#### Step 2: NavigationPolicyEngine (depends on TEC for nothing; depends on BAM.hotswapRedirectMap read-only)
+| Method | Line | Notes |
+|--------|------|-------|
+| `handleBeforeNavigate` | 792 | Sync — populate pendingInterceptions |
+| `handleBeforeRequest` | 825 | Sync blocking — cancel + fire async |
+| `executeInterception` | 844 | Async — resolve mapping → return intent |
+| New: `evaluateTabNavigation` | — | For handleTabUpdated path |
+| New: `evaluateHotswapRedirect` | — | For handleTabCreated/handleWindowCreated path |
+
+#### Step 3: BookmarkAssignmentManager (depends on nothing; exposes hotswapRedirectMap)
+| Method | Line | Notes |
+|--------|------|-------|
+| `createMenuItems` | 444 | Build radio items for containers |
+| `rebuildMenuItems` | 407 | Refresh menu for bookmark context |
+| `getSelectedMenuContainerId` | 418 | Parse bookmark URL → current assignment |
+| `getContainer` | 540 | Resolve cookieStoreId/backupName → ContextualIdentity |
+| `updateBookmarkContainerUrl` | 571 | Core assignment: encode/decode URL |
+| `applyContainer` | 637 | Batch-assign to bookmarks |
+| `handleMenuClick` | 884 | Menu click → assign + hotswap |
+| `handleMenuShown` | 905 | Menu shown → rebuild + hotswap decode |
+| `handleMenuHidden` | 960 | Menu hidden → revert hotswap |
+| `handleBookmarkChanged` | 987 | Detect user edit during hotswap |
+| `handleBookmarkCreated` | 1039 | Strip orphaned encoding from new bookmarks |
+| `detectTempContainersExtension` | 176 | Check for TC/TC+ addon |
+| `persistHotswapRecords` | 313 | Persist hotswap state to storage |
+| `recoverPendingHotswaps` | 325 | Crash recovery |
+| `cancelHotswapTimer` | 352 | Cancel revert timer |
+| `revertHotswap` | 364 | Execute revert |
+
+#### Step 4: ContainMarksRuntime (wiring — last step, composes modules)
+| Method | Line | Notes |
+|--------|------|-------|
+| `initialize` | 160 | Wire modules + register listeners |
+| `startup` | 198 | Migration + recovery sequence |
+| `migrateLegacyStorage` | 226 | One-time legacy migration |
+| `migrateAboutBookmarks` | 263 | One-time about: URL migration |
+| `refreshTokensOnStartup` | 286 | Token refresh sweep |
+| `handleTabCreated` | 1079 | Route: evaluate hotswap → execute intent |
+| `handleWindowCreated` | 1121 | Route: evaluate each tab → execute intent |
+| `handleTabUpdated` | 1166 | Route: evaluate URL change → execute intent |
+| `handleTabActivated` | 1240 | Route: sync page action |
+| `registerListeners` | 1306 | Wire all browser listeners |
+| `getMappingStore` | 380 | Select sync vs local store |
+| `debug` | 147 | Conditional logging |
+
+### Test update plan
+
+- **Step 1** (TEC): New `tests/tabExecutionController.test.ts` — test openInContainer, cleanupOrphanedTabs, executeIntent. Mock browser.tabs.create/remove.
+- **Step 2** (NPE): New `tests/navigationPolicyEngine.test.ts` — test intent output for each scenario (fragment URL, hotswap match, already-in-container, missing mapping). Mock only webNavigation/webRequest details.
+- **Step 3** (BAM): New `tests/bookmarkAssignmentManager.test.ts` — test menu rebuild, hotswap encode/decode/revert, TC detection, bookmark event handling.
+- **Step 4** (CMR): Adapt existing `tests/backgroundApp.test.ts` — verify wiring, startup sequence, event routing. Integration-level tests that exercise the full pipeline.
+
+### Key constraint
+After each step, `npm run typecheck && npm test` must remain green. BackgroundApp continues to exist and work throughout; methods are extracted one module at a time, with BackgroundApp delegating to the new module where extraction is complete.

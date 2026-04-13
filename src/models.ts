@@ -283,3 +283,50 @@ export interface BrowserApi {
 export interface LoggerLike {
 	log: (...args: unknown[]) => void
 }
+
+// --- Navigation intent types (shared vocabulary for module boundaries) ---
+
+/**
+ * A bookmark URL that was temporarily decoded ("hotswapped") so the native Properties
+ * dialog shows the clean URL. Persisted to storage for crash safety.
+ */
+export interface HotswapRecord {
+	encodedUrl: string
+	containerIndex: number
+}
+
+/**
+ * A tab navigation that was flagged by `onBeforeNavigate` (which can read fragment) and
+ * is awaiting cancellation by `onBeforeRequest`. Short-lived: deleted once the request
+ * is cancelled and the async redirect fires.
+ */
+export interface PendingInterception {
+	containerIndex: number
+	realUrl: string
+	encodedUrl: string
+}
+
+/**
+ * Info attached to a decoded URL during a hotswap window, so that new-tab/new-window
+ * navigations to the decoded URL can be intercepted and reopened in the correct container.
+ */
+export interface HotswapRedirectInfo {
+	containerIndex: number
+	bookmarkId: string
+}
+
+/**
+ * Discriminated union returned by NavigationPolicyEngine. Each variant tells
+ * TabExecutionController exactly what side-effect to perform, without encoding
+ * *how* to perform it.
+ *
+ * - `noop`: No redirect needed (already in target container, or no mapping found).
+ * - `redirect`: Open the URL in a specific container, closing the source tab.
+ * - `redirect-temp`: Open the URL in a fresh Temporary Container.
+ * - `reset-token`: After redirect, regenerate the bookmark's token (when settings require it).
+ */
+export type NavigationIntent =
+	| { readonly action: 'noop' }
+	| { readonly action: 'redirect'; readonly cookieStoreId: string; readonly url: string }
+	| { readonly action: 'redirect-temp'; readonly url: string }
+	| { readonly action: 'reset-token'; readonly cookieStoreId: string; readonly url: string; readonly bookmark: BookmarkNode }
