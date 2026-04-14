@@ -35,6 +35,7 @@ import type {
 	NavigationIntent,
 	PendingInterception,
 	Tab,
+	TabChangeInfo,
 	WebNavigationBeforeNavigateDetails,
 	WebRequestBeforeRequestDetails,
 } from '../models'
@@ -106,6 +107,19 @@ export interface NavigationPolicyEngine {
 	 * Used by the runtime to check tabs from `onCreated` and `onWindowCreated`.
 	 */
 	evaluateHotswapRedirect(url: string, tab: Tab): Promise<NavigationIntent>
+
+	/**
+	 * Unified policy evaluation for `tabs.onUpdated` events. Absorbs the URL-type
+	 * detection, event filtering, hotswap redirect check, and webRequest dedup logic
+	 * that the wiring layer should not own.
+	 *
+	 * Returns `noop` when:
+	 * - The webRequest pipeline already claimed this tabId (prevents double-open)
+	 * - The URL is not container-encoded
+	 * - Fragment-encoded URL with no `changeInfo.url` (status-only update after redirect)
+	 * - Legacy about: URL with status != 'complete'
+	 */
+	evaluateTabUpdated(url: string, tab: Tab, changeInfo: TabChangeInfo): Promise<NavigationIntent>
 }
 
 // --- Implementation ---
@@ -116,6 +130,14 @@ export class NavigationPolicyEngineImpl implements NavigationPolicyEngine {
 	private readonly browserApi: BrowserApi
 	private readonly deps: NavigationPolicyEngineDeps
 	private readonly pendingInterceptions = new Map<number, PendingInterception>()
+
+	/**
+	 * TabIds currently being processed by the webRequest cancel→resolve pipeline.
+	 * Set synchronously in `handleBeforeRequest`, cleared after `onIntentResolved` completes.
+	 * Prevents `evaluateTabUpdated` from producing a duplicate redirect intent when
+	 * both `onBeforeRequest` and `tabs.onUpdated` fire for the same navigation.
+	 */
+	private readonly claimedTabIds = new Set<number>()
 
 	constructor(deps: NavigationPolicyEngineDeps) {
 		this.deps = deps
@@ -174,12 +196,19 @@ export class NavigationPolicyEngineImpl implements NavigationPolicyEngine {
 		const interception = this.pendingInterceptions.get(details.tabId)
 		if (!interception) return
 
+		// Claim this tabId so evaluateTabUpdated yields noop for the same navigation.
+		this.claimedTabIds.add(details.tabId)
+
 		// Fire and forget — resolve intent asynchronously
 		const tabId = details.tabId
 		setTimeout(async () => {
 			this.pendingInterceptions.delete(tabId)
-			const intent = await this.resolveInterception(interception)
-			this.deps.onIntentResolved(intent, tabId)
+			try {
+				const intent = await this.resolveInterception(interception)
+				this.deps.onIntentResolved(intent, tabId)
+			} finally {
+				this.claimedTabIds.delete(tabId)
+			}
 		}, 0)
 
 		return { cancel: true }
@@ -267,6 +296,29 @@ export class NavigationPolicyEngineImpl implements NavigationPolicyEngine {
 		if (!hotswapInfo) return NOOP
 
 		return this.resolveHotswapMapping(url, hotswapInfo.containerIndex, tab)
+	}
+
+	async evaluateTabUpdated(url: string, tab: Tab, changeInfo: TabChangeInfo): Promise<NavigationIntent> {
+		// Hotswap redirect — catches "Open in New Tab" during hotswap when the URL is decoded.
+		if (url && tab.id !== undefined) {
+			const hotswapIntent = await this.evaluateHotswapRedirect(url, tab)
+			if (hotswapIntent.action !== 'noop') return hotswapIntent
+		}
+
+		if (!isPrefixedUrl(url)) return NOOP
+
+		// Dedup: the webRequest pipeline already claimed this tab — a redirect is in flight.
+		if (tab.id !== undefined && (this.pendingInterceptions.has(tab.id) || this.claimedTabIds.has(tab.id))) {
+			return NOOP
+		}
+
+		// Fragment-encoded URLs: only on URL change (same-page nav or when webRequest missed).
+		// Legacy about: URLs: only on status complete (original behavior).
+		const isFragment = isFragmentEncodedUrl(url)
+		if (isFragment && !changeInfo.url) return NOOP
+		if (!isFragment && changeInfo.status !== 'complete') return NOOP
+
+		return this.evaluateTabNavigation(url, tab)
 	}
 
 	/**

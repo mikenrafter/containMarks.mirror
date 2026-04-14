@@ -29,9 +29,7 @@ import {
 	FRAGMENT_PREFIX,
 	PREFIX,
 	getNewUrl,
-	isFragmentEncodedUrl,
 	isLegacyEncodedUrl,
-	isPrefixedUrl,
 	readLegacyStorageKeys,
 	readLegacyReference,
 	parseLegacyBookmarkUrl,
@@ -276,9 +274,8 @@ export class BackgroundApp {
 	// --- Delegate event handlers ---
 
 	/**
-	 * Fallback interception path for cases where `onBeforeRequest` didn't fire — e.g. same-page
-	 * fragment navigations where no HTTP request is made. Also handles legacy `about:` encoded
-	 * bookmarks and hotswap redirects from tab updates.
+	 * Thin routing for `tabs.onUpdated` — page-action sync stays here (UI concern),
+	 * all navigation policy evaluation is delegated to NavigationPolicyEngine.
 	 */
 	public readonly handleTabUpdated = async (id: number, change: TabChangeInfo, tab: Tab): Promise<void> => {
 		// Page action sync on load complete
@@ -286,33 +283,10 @@ export class BackgroundApp {
 			await this.tabExecutionController.syncPageActionVisibilityForTab(id)
 		}
 
+		if (id === this.browserApi.tabs.TAB_ID_NONE) return
+
 		const currentUrl = tab.url ?? change.url ?? ''
-
-		// Hotswap redirect check — must run before the fallback interception below.
-		// Catches "Open in New Tab" during hotswap when the URL is decoded (clean).
-		if (currentUrl && tab.id !== undefined) {
-			const hotswapIntent = await this.navigationPolicyEngine.evaluateHotswapRedirect(currentUrl, tab)
-			if (hotswapIntent.action !== 'noop') {
-				await this.tabExecutionController.executeIntent(hotswapIntent, tab)
-				return
-			}
-		}
-
-		// Guard: only process container-encoded URLs (fragment or legacy about:)
-		if (id === this.browserApi.tabs.TAB_ID_NONE || !isPrefixedUrl(currentUrl)) {
-			return
-		}
-
-		// Fallback interception — only fires when the webRequest pipeline didn't handle it:
-		// - Fragment-encoded URLs: trigger only on URL change (same-page navigation or
-		//   when webRequest didn't fire). Avoids re-triggering on status updates after
-		//   the webRequest pipeline already cancelled and redirected.
-		// - Legacy about: URLs: trigger only on status complete (original behavior).
-		const isFragment = isFragmentEncodedUrl(currentUrl)
-		if (isFragment && !change.url) return
-		if (!isFragment && change.status !== 'complete') return
-
-		const intent = await this.navigationPolicyEngine.evaluateTabNavigation(currentUrl, tab)
+		const intent = await this.navigationPolicyEngine.evaluateTabUpdated(currentUrl, tab, change)
 		if (intent.action !== 'noop') {
 			await this.tabExecutionController.executeIntent(intent, tab)
 		}

@@ -440,4 +440,120 @@ describe('NavigationPolicyEngineImpl', () => {
 			expect(intent).toEqual({ action: 'redirect-temp', url: 'https://temphs.com' })
 		})
 	})
+
+	describe('evaluateTabUpdated', () => {
+		it('returns noop for non-encoded URLs', async () => {
+			const { deps } = createMockDeps()
+			const npe = new NavigationPolicyEngineImpl(deps)
+
+			const intent = await npe.evaluateTabUpdated(
+				'https://plain.com',
+				makeTab(),
+				{ status: 'complete', url: 'https://plain.com' }
+			)
+			expect(intent.action).toBe('noop')
+		})
+
+		it('returns redirect for fragment-encoded URL when changeInfo.url is present', async () => {
+			const { deps, browserApi } = createMockDeps()
+			const mappingStore = (deps.mappingStore as ReturnType<typeof vi.fn>)()
+			mappingStore._addMapping(1, 'firefox-container-2')
+
+			const encodedUrl = makeEncodedUrl(1, 'https://tab-nav.com')
+			const bookmark = { id: 'bm1', type: 'bookmark', url: encodedUrl }
+			;(browserApi.bookmarks.search as ReturnType<typeof vi.fn>).mockResolvedValue([bookmark])
+
+			const npe = new NavigationPolicyEngineImpl(deps)
+			const intent = await npe.evaluateTabUpdated(
+				encodedUrl,
+				makeTab({ url: encodedUrl }),
+				{ url: encodedUrl }
+			)
+			expect(intent).toEqual({
+				action: 'redirect',
+				cookieStoreId: 'firefox-container-2',
+				url: 'https://tab-nav.com',
+			})
+		})
+
+		it('returns noop for fragment-encoded URL when changeInfo.url is absent (status-only update)', async () => {
+			const { deps } = createMockDeps()
+			const npe = new NavigationPolicyEngineImpl(deps)
+
+			const encodedUrl = makeEncodedUrl(1)
+			const intent = await npe.evaluateTabUpdated(
+				encodedUrl,
+				makeTab({ url: encodedUrl }),
+				{ status: 'complete' }
+			)
+			expect(intent.action).toBe('noop')
+		})
+
+		it('returns noop when webRequest pipeline claimed the tab (prevents double-open)', async () => {
+			const { deps, browserApi } = createMockDeps()
+			const mappingStore = (deps.mappingStore as ReturnType<typeof vi.fn>)()
+			mappingStore._addMapping(1, 'firefox-container-1')
+
+			const encodedUrl = makeEncodedUrl(1, 'https://double-open.com')
+			const bookmark = { id: 'bm1', type: 'bookmark', url: encodedUrl }
+			;(browserApi.bookmarks.search as ReturnType<typeof vi.fn>).mockResolvedValue([bookmark])
+
+			const npe = new NavigationPolicyEngineImpl(deps)
+
+			// Simulate the webRequest pipeline: onBeforeNavigate + onBeforeRequest
+			npe.handleBeforeNavigate({ tabId: 1, url: encodedUrl, frameId: 0 })
+			const cancelResult = npe.handleBeforeRequest({
+				requestId: '1', tabId: 1, url: 'https://double-open.com', type: 'main_frame'
+			})
+			expect(cancelResult).toEqual({ cancel: true })
+
+			// Now evaluateTabUpdated fires for the same tab — should yield noop
+			const intent = await npe.evaluateTabUpdated(
+				encodedUrl,
+				makeTab({ id: 1, url: encodedUrl }),
+				{ url: encodedUrl }
+			)
+			expect(intent.action).toBe('noop')
+		})
+
+		it('returns noop when pendingInterception exists but handleBeforeRequest has not fired yet', async () => {
+			const { deps } = createMockDeps()
+			const mappingStore = (deps.mappingStore as ReturnType<typeof vi.fn>)()
+			mappingStore._addMapping(1, 'firefox-container-1')
+
+			const encodedUrl = makeEncodedUrl(1, 'https://pending.com')
+
+			const npe = new NavigationPolicyEngineImpl(deps)
+
+			// Simulate only onBeforeNavigate (no onBeforeRequest yet)
+			npe.handleBeforeNavigate({ tabId: 1, url: encodedUrl, frameId: 0 })
+
+			const intent = await npe.evaluateTabUpdated(
+				encodedUrl,
+				makeTab({ id: 1, url: encodedUrl }),
+				{ url: encodedUrl }
+			)
+			expect(intent.action).toBe('noop')
+		})
+
+		it('checks hotswap redirect map before encoded-URL checks', async () => {
+			const { deps, hotswapMap } = createMockDeps()
+			const mappingStore = (deps.mappingStore as ReturnType<typeof vi.fn>)()
+			mappingStore._addMapping(2, 'firefox-container-3')
+
+			hotswapMap.set('https://hotswap-tab.com', { containerIndex: 2, bookmarkId: 'bm1' })
+
+			const npe = new NavigationPolicyEngineImpl(deps)
+			const intent = await npe.evaluateTabUpdated(
+				'https://hotswap-tab.com',
+				makeTab({ cookieStoreId: 'firefox-default' }),
+				{ url: 'https://hotswap-tab.com' }
+			)
+			expect(intent).toEqual({
+				action: 'redirect',
+				cookieStoreId: 'firefox-container-3',
+				url: 'https://hotswap-tab.com',
+			})
+		})
+	})
 })
