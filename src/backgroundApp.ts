@@ -102,6 +102,7 @@ export class BackgroundApp {
 			getContainer: (q) => this.bookmarkAssignmentManager.getContainer(q),
 			updateBookmarkContainerUrl: (b, c) => this.bookmarkAssignmentManager.updateBookmarkContainerUrl(b, c),
 			isTempContainer: (c) => this.bookmarkAssignmentManager.isTempContainer(c),
+			preHotswapTabIds: () => this.bookmarkAssignmentManager.preHotswapTabIds,
 		})
 
 		this.navigationPolicyEngine = new NavigationPolicyEngineImpl({

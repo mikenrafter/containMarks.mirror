@@ -516,7 +516,7 @@ describe('NavigationPolicyEngineImpl', () => {
 			expect(intent.action).toBe('noop')
 		})
 
-		it('returns noop when pendingInterception exists but handleBeforeRequest has not fired yet', async () => {
+		it('consumes orphaned pendingInterception when handleBeforeRequest did not fire', async () => {
 			const { deps } = createMockDeps()
 			const mappingStore = (deps.mappingStore as ReturnType<typeof vi.fn>)()
 			mappingStore._addMapping(1, 'firefox-container-1')
@@ -525,7 +525,7 @@ describe('NavigationPolicyEngineImpl', () => {
 
 			const npe = new NavigationPolicyEngineImpl(deps)
 
-			// Simulate only onBeforeNavigate (no onBeforeRequest yet)
+			// Simulate only onBeforeNavigate (no onBeforeRequest — e.g. same-page fragment nav)
 			npe.handleBeforeNavigate({ tabId: 1, url: encodedUrl, frameId: 0 })
 
 			const intent = await npe.evaluateTabUpdated(
@@ -533,7 +533,12 @@ describe('NavigationPolicyEngineImpl', () => {
 				makeTab({ id: 1, url: encodedUrl }),
 				{ url: encodedUrl }
 			)
-			expect(intent.action).toBe('noop')
+			// webRequest didn't fire, so evaluateTabUpdated should consume the interception
+			expect(intent.action).toBe('redirect')
+			if (intent.action === 'redirect') {
+				expect(intent.cookieStoreId).toBe('firefox-container-1')
+				expect(intent.url).toBe('https://pending.com')
+			}
 		})
 
 		it('checks hotswap redirect map before encoded-URL checks', async () => {

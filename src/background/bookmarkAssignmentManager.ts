@@ -87,6 +87,13 @@ export interface BookmarkAssignmentManager {
 	/** Extension ID of detected TC/TC+ addon, or null if neither is installed. */
 	readonly tempContainersExtensionId: string | null
 
+	/**
+	 * Tab IDs captured at `handleMenuHidden` time — before TC has a chance to create orphans.
+	 * Used by TEC to distinguish pre-existing tabs from TC-created orphans during redirect.
+	 * Null when no hotswap is in progress.
+	 */
+	readonly preHotswapTabIds: ReadonlySet<number | undefined> | null
+
 	// --- Lifecycle ---
 
 	/** Detect TC extension, recover persisted hotswap records, create initial menu items. */
@@ -154,6 +161,7 @@ export class BookmarkAssignmentManagerImpl implements BookmarkAssignmentManager 
 	private pendingEditBookmark: { id: string; containerIndex: number } | null = null
 
 	private _tempContainersExtensionId: string | null = null
+	private _preHotswapTabIds: Set<number | undefined> | null = null
 
 	constructor(deps: BookmarkAssignmentManagerDeps) {
 		this.deps = deps
@@ -175,7 +183,9 @@ export class BookmarkAssignmentManagerImpl implements BookmarkAssignmentManager 
 	get tempContainersExtensionId(): string | null {
 		return this._tempContainersExtensionId
 	}
-
+	get preHotswapTabIds(): ReadonlySet<number | undefined> | null {
+		return this._preHotswapTabIds
+	}
 	private debug(...args: unknown[]): void {
 		this.deps.logger.log(...args)
 	}
@@ -487,6 +497,10 @@ export class BookmarkAssignmentManagerImpl implements BookmarkAssignmentManager 
 
 	readonly handleMenuShown = async (info: MenusOnShownInfo): Promise<void> => {
 		this.pendingEditBookmark = null
+		// Clear the previous hotswap tab snapshot — a new menu interaction starts fresh.
+		// The snapshot is set in handleMenuHidden and persists until the next handleMenuShown,
+		// giving the async redirect chain time to consume it even after the revert timer fires.
+		this._preHotswapTabIds = null
 
 		try {
 			if (info.contexts.includes('bookmark') && info.bookmarkId) {
@@ -529,6 +543,12 @@ export class BookmarkAssignmentManagerImpl implements BookmarkAssignmentManager 
 	}
 
 	readonly handleMenuHidden = async (): Promise<void> => {
+		// Capture tab snapshot NOW — before TC can create orphan tabs in response to
+		// the user's next action (Open, Open in New Tab, Open in New Window).
+		// TEC uses this to distinguish pre-existing tabs from TC-created orphans.
+		const allTabs = await this.browserApi.tabs.query({})
+		this._preHotswapTabIds = new Set(allTabs.map(t => t.id))
+
 		for (const [bookmarkId, record] of this.hotswapRecords) {
 			if (this.hotswapRevertTimers.has(bookmarkId)) continue
 

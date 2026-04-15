@@ -257,7 +257,7 @@ export function getNewUrl(tokenSource: BookmarkTokenSource, containerIndex: numb
 	return `${baseUrl}#${encoding}`
 }
 
-/** Checks whether a URL is a containMarks-encoded bookmark URL (any version) with a valid token. */
+/** Checks whether a URL is a containMarks-encoded bookmark URL. */
 export function isPrefixedUrl(url: string, logger?: LoggerLike): boolean {
 	const parsed = parseBookmarkUrl(url)
 	logger?.log('isPrefixedUrl', url, parsed)

@@ -50,6 +50,8 @@ export interface TabExecutionControllerDeps {
 	updateBookmarkContainerUrl(bookmark: BookmarkNode, cookieStoreId?: string | null): Promise<BookmarkReference | null>
 	/** Checks whether a cookieStoreId belongs to an ephemeral Temporary Container. Injected from BAM. */
 	isTempContainer(cookieStoreId: string): Promise<boolean>
+	/** Tab IDs captured at menu-hidden time, before TC can interfere. Null when no hotswap active. */
+	preHotswapTabIds(): ReadonlySet<number | undefined> | null
 }
 
 /**
@@ -77,10 +79,12 @@ export interface TabExecutionController {
 	openInContainer(cookieStoreId: string, url: string, tab: Tab): Promise<void>
 
 	/**
-	 * After a redirect, clean up orphaned about:blank tabs that Temporary Containers
-	 * may have created in the same window.
+	 * After a redirect, clean up orphaned tabs in ephemeral Temporary Containers.
+	 * Uses the TC API to definitively identify temp containers rather than URL heuristics.
+	 * The `preRedirectTabIds` set contains tab IDs that existed before the redirect
+	 * started — only tabs NOT in this set are candidates for removal.
 	 */
-	cleanupOrphanedTabs(windowId: number, targetCookieStoreId: string): Promise<void>
+	cleanupOrphanedTabs(windowId: number, targetCookieStoreId: string, preRedirectTabIds: ReadonlySet<number | undefined>): Promise<void>
 
 	// --- Page action ---
 
@@ -153,12 +157,42 @@ export class TabExecutionControllerImpl implements TabExecutionController {
 				return
 			}
 
+			// Use the BAM-provided snapshot captured at handleMenuHidden (before TC acts).
+			// Fall back to a self-snapshot if no hotswap is active (e.g. direct bookmark click).
+			const hasTempContainers = this.deps.tempContainersExtensionId() !== null
+			let preRedirectTabIds: ReadonlySet<number | undefined> | null;
+			if (hasTempContainers) {
+				preRedirectTabIds = this.deps.preHotswapTabIds()
+				if (tab.windowId != undefined) {
+					preRedirectTabIds ??= new Set((await this.browserApi.tabs.query({ windowId: tab.windowId })).map(t => t.id))
+				}
+			} else {
+				preRedirectTabIds = null
+			}
+
 			await this.browserApi.tabs.create({
 				cookieStoreId: container.cookieStoreId,
 				url,
 				index: tab.index + 1
 			})
-			await this.browserApi.tabs.remove(tab.id!)
+
+			try {
+				await this.browserApi.tabs.remove(tab.id!)
+				if (preRedirectTabIds !== null && tab.windowId !== undefined) {
+					await this.cleanupOrphanedTabs(tab.windowId, container.cookieStoreId, preRedirectTabIds)
+				}
+			} catch (removeError) {
+				// TC may have already replaced the source tab (changing its ID), making the
+				// original ID invalid. Cleanup below will find and remove the TC replacement.
+				this.debug('openInContainer: source tab removal failed (TC likely replaced it)', removeError)
+
+				if (preRedirectTabIds !== null && tab.windowId !== undefined) {
+					this.debug('openInContainer: running cleanup for TC orphaned tab in window', tab.windowId)
+					// give TC a little time to activate
+					await new Promise(resolve => setTimeout(resolve, 500))
+					await this.cleanupOrphanedTabs(tab.windowId, container.cookieStoreId, preRedirectTabIds)
+				}
+			}
 		} catch (error) {
 			this.debug(error)
 		}
@@ -193,37 +227,35 @@ export class TabExecutionControllerImpl implements TabExecutionController {
 		}
 	}
 
-	async cleanupOrphanedTabs(windowId: number, targetCookieStoreId: string): Promise<void> {
-        const oldTabs = await this.browserApi.tabs.query({ windowId })
-        this.debug('cleanupOrphanedTabs: existing tabs in window', windowId, oldTabs)
+	async cleanupOrphanedTabs(windowId: number, targetCookieStoreId: string, preRedirectTabIds: ReadonlySet<number | undefined>): Promise<void> {
+		this.debug('cleanupOrphanedTabs: pre-redirect tab IDs', [...preRedirectTabIds])
 
-        // TC may create orphaned about:blank tabs asynchronously after the redirect, so wait a moment before checking
-		await new Promise(resolve => setTimeout(resolve, 150))
+		let i = 0;
+		// loop to extend the effective time period cleanup is run for
+		while (i++ < 6) {
+			this.debug(`cleanupOrphanedTabs: iteration ${i} — checking for TC orphan tabs in window ${windowId} targeting container ${targetCookieStoreId}`)
+			// TC may still be creating orphan tabs asynchronously — wait for it to settle.
+			await new Promise(resolve => setTimeout(resolve, 150))
 
-		try {
-			const tabs = await this.browserApi.tabs.query({ windowId })
-			for (const tab of tabs) {
-                // Exclusion guard: only consider tabs that appeared AFTER the delay,
-                // so we never remove pre-existing about:blank tabs. Trade-off: if TC creates
-                // the orphan before our snapshot (rare), we'll miss it — same heuristic as the
-                // 150ms delay itself. Needs integration testing with TC installed.
-                // HUMAN TODO test this in runtime extensively.
+			try {
+				const tabs = await this.browserApi.tabs.query({ windowId })
+				for (const tab of tabs) {
+					// Only consider tabs that appeared after the pre-redirect snapshot.
+					if (preRedirectTabIds.has(tab.id)) continue
+					if (tab.id === undefined || !tab.cookieStoreId) continue
+					// Skip the target container — that's our redirect destination, not an orphan.
+					if (tab.cookieStoreId === targetCookieStoreId) continue
 
-                // leave preexisting tabs be
-                if (oldTabs.some(oldTab => oldTab.id === tab.id)) continue;
-
-                const isOrphan = tab.url === 'about:blank'
-					&& tab.cookieStoreId !== NO_CONTAINER
-					&& tab.cookieStoreId !== targetCookieStoreId
-					&& tab.id !== undefined
-
-				if (isOrphan) {
-					this.debug('cleanupOrphanedTabs: removing orphaned tab', tab.id, tab.cookieStoreId)
-					await this.browserApi.tabs.remove(tab.id!)
+					// Ask TC directly whether this tab's container is ephemeral.
+					const isTemp = await this.deps.isTempContainer(tab.cookieStoreId)
+					if (isTemp) {
+						this.debug('cleanupOrphanedTabs: removing TC orphan tab', tab.id, tab.cookieStoreId)
+						await this.browserApi.tabs.remove(tab.id)
+					}
 				}
+			} catch (error) {
+				this.debug('cleanupOrphanedTabs: error', error)
 			}
-		} catch (error) {
-			this.debug('cleanupOrphanedTabs: error', error)
 		}
 	}
 

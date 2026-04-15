@@ -43,7 +43,7 @@ import type { ContainerMappingStore } from '../containerMappingStore'
 import {
 	isFragmentEncodedUrl,
 	isLegacyEncodedUrl,
-	isPrefixedUrl,
+	isPrefixedUrl as isContainMarksUrl,
 	parseBookmarkUrl,
 } from '../urlCodec'
 import { TEMP_CONTAINER_SENTINEL } from '../backgroundApp'
@@ -169,6 +169,11 @@ export class NavigationPolicyEngineImpl implements NavigationPolicyEngine {
 					hotswapInfo.containerIndex,
 					details.tabId
 				)
+				// this.pendingInterceptions.set(details.tabId, {
+				// 	containerIndex: hotswapInfo.containerIndex,
+				// 	realUrl: details.url,
+				// 	encodedUrl: ''
+				// })
 				return
 			}
 		}
@@ -251,7 +256,7 @@ export class NavigationPolicyEngineImpl implements NavigationPolicyEngine {
 	}
 
 	async evaluateTabNavigation(url: string, tab: Tab): Promise<NavigationIntent> {
-		if (!isPrefixedUrl(url)) return NOOP
+		if (!isContainMarksUrl(url)) return NOOP
 
 		try {
 			const settings = await this.deps.settings()
@@ -299,17 +304,26 @@ export class NavigationPolicyEngineImpl implements NavigationPolicyEngine {
 	}
 
 	async evaluateTabUpdated(url: string, tab: Tab, changeInfo: TabChangeInfo): Promise<NavigationIntent> {
+		if (!url || tab.id == undefined) return NOOP
 		// Hotswap redirect — catches "Open in New Tab" during hotswap when the URL is decoded.
-		if (url && tab.id !== undefined) {
+		if (url && tab.id != undefined) {
 			const hotswapIntent = await this.evaluateHotswapRedirect(url, tab)
 			if (hotswapIntent.action !== 'noop') return hotswapIntent
 		}
 
-		if (!isPrefixedUrl(url)) return NOOP
-
 		// Dedup: the webRequest pipeline already claimed this tab — a redirect is in flight.
-		if (tab.id !== undefined && (this.pendingInterceptions.has(tab.id) || this.claimedTabIds.has(tab.id))) {
+		if (this.claimedTabIds.has(tab.id)) {
 			return NOOP
+		}
+
+		if (!isContainMarksUrl(url)) return NOOP;
+		// Consume orphaned pending interception: webRequest didn't fire because there's no HTTP
+		// request for this navigation (same-page fragment change, about: URL, etc.). Safe because
+		// Firefox guarantees tabs.onUpdated fires after webRequest.onBeforeRequest would have.
+		if (this.pendingInterceptions.has(tab.id)) {
+			const interception = this.pendingInterceptions.get(tab.id)!
+			this.pendingInterceptions.delete(tab.id)
+			return this.resolveInterception(interception)
 		}
 
 		// Fragment-encoded URLs: only on URL change (same-page nav or when webRequest missed).

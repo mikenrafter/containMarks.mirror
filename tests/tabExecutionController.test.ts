@@ -126,6 +126,7 @@ function createMockDeps(overrides: Partial<TabExecutionControllerDeps> = {}): {
 		}),
 		updateBookmarkContainerUrl: vi.fn().mockResolvedValue(null),
 		isTempContainer: vi.fn().mockResolvedValue(false),
+		preHotswapTabIds: vi.fn().mockReturnValue(null),
 		...overrides,
 	}
 
@@ -276,61 +277,67 @@ describe('TabExecutionControllerImpl', () => {
 	})
 
 	describe('cleanupOrphanedTabs', () => {
-		it('removes new about:blank tabs in non-default containers', async () => {
-			const { deps, browserApi } = createMockDeps()
+		it('removes new tabs in ephemeral temp containers', async () => {
+			const { deps, browserApi } = createMockDeps({
+				isTempContainer: vi.fn().mockResolvedValue(true),
+			})
 			const tec = new TabExecutionControllerImpl(deps)
 
-			// First query (pre-delay snapshot): window has one pre-existing tab
 			const preExistingTab = { id: 10, url: 'https://keep.com', index: 0, cookieStoreId: 'firefox-container-1' }
-			// Second query (post-delay): TC added an orphan
 			const orphanTab = { id: 20, url: 'about:blank', index: 1, cookieStoreId: 'firefox-container-99' }
 			;(browserApi.tabs.query as ReturnType<typeof vi.fn>)
-				.mockResolvedValueOnce([preExistingTab])       // pre-delay snapshot
-				.mockResolvedValueOnce([preExistingTab, orphanTab])  // post-delay check
+				.mockResolvedValueOnce([preExistingTab, orphanTab])
 
-			await tec.cleanupOrphanedTabs(1, 'firefox-container-1')
+			const preRedirectTabIds = new Set<number | undefined>([10])
+			await tec.cleanupOrphanedTabs(1, 'firefox-container-1', preRedirectTabIds)
 
 			expect(browserApi.tabs.remove).toHaveBeenCalledWith(20)
 		})
 
-		it('does not remove pre-existing about:blank tabs', async () => {
-			const { deps, browserApi } = createMockDeps()
+		it('does not remove pre-existing tabs even if in temp containers', async () => {
+			const { deps, browserApi } = createMockDeps({
+				isTempContainer: vi.fn().mockResolvedValue(true),
+			})
 			const tec = new TabExecutionControllerImpl(deps)
 
 			const preExistingBlank = { id: 10, url: 'about:blank', index: 0, cookieStoreId: 'firefox-container-99' }
 			;(browserApi.tabs.query as ReturnType<typeof vi.fn>)
-				.mockResolvedValueOnce([preExistingBlank])   // pre-delay snapshot
-				.mockResolvedValueOnce([preExistingBlank])   // post-delay — same tab still there
+				.mockResolvedValueOnce([preExistingBlank])
 
-			await tec.cleanupOrphanedTabs(1, 'firefox-container-1')
+			const preRedirectTabIds = new Set<number | undefined>([10])
+			await tec.cleanupOrphanedTabs(1, 'firefox-container-1', preRedirectTabIds)
 
 			expect(browserApi.tabs.remove).not.toHaveBeenCalled()
 		})
 
 		it('does not remove tabs in target container', async () => {
-			const { deps, browserApi } = createMockDeps()
+			const { deps, browserApi } = createMockDeps({
+				isTempContainer: vi.fn().mockResolvedValue(false),
+			})
 			const tec = new TabExecutionControllerImpl(deps)
 
 			const newTabInTarget = { id: 30, url: 'about:blank', index: 1, cookieStoreId: 'firefox-container-1' }
 			;(browserApi.tabs.query as ReturnType<typeof vi.fn>)
-				.mockResolvedValueOnce([])               // pre-delay — empty
-				.mockResolvedValueOnce([newTabInTarget])  // post-delay — new tab, but it's in target container
+				.mockResolvedValueOnce([newTabInTarget])
 
-			await tec.cleanupOrphanedTabs(1, 'firefox-container-1')
+			const preRedirectTabIds = new Set<number | undefined>()
+			await tec.cleanupOrphanedTabs(1, 'firefox-container-1', preRedirectTabIds)
 
 			expect(browserApi.tabs.remove).not.toHaveBeenCalled()
 		})
 
-		it('does not remove tabs in default container', async () => {
-			const { deps, browserApi } = createMockDeps()
+		it('does not remove tabs when isTempContainer returns false', async () => {
+			const { deps, browserApi } = createMockDeps({
+				isTempContainer: vi.fn().mockResolvedValue(false),
+			})
 			const tec = new TabExecutionControllerImpl(deps)
 
-			const defaultBlank = { id: 40, url: 'about:blank', index: 1, cookieStoreId: NO_CONTAINER }
+			const newTab = { id: 40, url: 'about:blank', index: 1, cookieStoreId: 'firefox-container-5' }
 			;(browserApi.tabs.query as ReturnType<typeof vi.fn>)
-				.mockResolvedValueOnce([])
-				.mockResolvedValueOnce([defaultBlank])
+				.mockResolvedValueOnce([newTab])
 
-			await tec.cleanupOrphanedTabs(1, 'firefox-container-1')
+			const preRedirectTabIds = new Set<number | undefined>()
+			await tec.cleanupOrphanedTabs(1, 'firefox-container-1', preRedirectTabIds)
 
 			expect(browserApi.tabs.remove).not.toHaveBeenCalled()
 		})
