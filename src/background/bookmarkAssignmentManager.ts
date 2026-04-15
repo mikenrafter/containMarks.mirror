@@ -553,10 +553,16 @@ export class BookmarkAssignmentManagerImpl implements BookmarkAssignmentManager 
 			if (this.hotswapRevertTimers.has(bookmarkId)) continue
 
 			const decodedUrl = decodeToRealUrl(record.encodedUrl)
-			this._hotswapRedirectMap.set(decodedUrl, {
-				containerIndex: record.containerIndex,
-				bookmarkId
-			})
+
+			// Guard: handleBeforeNavigate may have already consumed the entry during the
+			// async tabs.query above. Don't re-add — that would cause a duplicate redirect
+			// when TC creates a replacement tab for the same URL.
+			if (!this._hotswapRedirectMap.has(decodedUrl)) {
+				this._hotswapRedirectMap.set(decodedUrl, {
+					containerIndex: record.containerIndex,
+					bookmarkId
+				})
+			}
 
 			const timer = setTimeout(async () => {
 				await this.revertHotswap(bookmarkId, record)

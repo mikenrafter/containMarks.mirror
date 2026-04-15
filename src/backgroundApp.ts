@@ -320,19 +320,38 @@ export class BackgroundApp {
 	/**
 	 * Insurance handler for "Open in New Window" during a hotswap. Queries tabs in
 	 * the new window and checks their URLs against the hotswap redirect map via NPE.
+	 * After redirecting, cleans up TC orphan tabs — using the initial tab set as the
+	 * baseline because `openInContainer`'s own snapshot is too late for new windows.
 	 */
 	public readonly handleWindowCreated = async (window: import('./models').Window): Promise<void> => {
 		if (!window.id) return
 
 		try {
 			const tabs = await this.browserApi.tabs.query({ windowId: window.id })
+			const initialTabIds = new Set(tabs.map(t => t.id))
+			let redirectTargetCookieStoreId: string | null = null
+
 			for (const tab of tabs) {
 				if (!tab.url || !tab.id) continue
 
 				const intent = await this.navigationPolicyEngine.evaluateHotswapRedirect(tab.url, tab)
 				if (intent.action !== 'noop') {
 					await this.tabExecutionController.executeIntent(intent, tab)
+					if (intent.action === 'redirect' || intent.action === 'reset-token') {
+						redirectTargetCookieStoreId = intent.cookieStoreId
+					}
 				}
+			}
+
+			// In a new window, openInContainer's internal snapshot captures TC orphans as
+			// "pre-existing" because they appeared before openInContainer ran. Do a second
+			// cleanup pass using the window's initial tab set — which predates TC's orphan.
+			if (redirectTargetCookieStoreId && this.bookmarkAssignmentManager.tempContainersExtensionId) {
+				await this.tabExecutionController.cleanupOrphanedTabs(
+					window.id,
+					redirectTargetCookieStoreId,
+					initialTabIds
+				)
 			}
 		} catch (error) {
 			this.debug('handleWindowCreated: error', error)
