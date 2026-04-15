@@ -359,6 +359,7 @@ describe('TabExecutionControllerImpl', () => {
 		it('shows page action when setting is enabled and not already shown', async () => {
 			const { deps, browserApi } = createMockDeps()
 			;(browserApi.pageAction.isShown as ReturnType<typeof vi.fn>).mockResolvedValue(false)
+			;(browserApi.tabs.get as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 1, index: 0, cookieStoreId: 'firefox-container-1' })
 			const tec = new TabExecutionControllerImpl(deps)
 
 			await tec.syncPageActionVisibilityForTab(1)
@@ -383,6 +384,7 @@ describe('TabExecutionControllerImpl', () => {
 		it('skips show/hide when already in desired state', async () => {
 			const { deps, browserApi } = createMockDeps()
 			;(browserApi.pageAction.isShown as ReturnType<typeof vi.fn>).mockResolvedValue(true)
+			;(browserApi.tabs.get as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 1, index: 0, cookieStoreId: 'firefox-container-1' })
 			const tec = new TabExecutionControllerImpl(deps)
 
 			await tec.syncPageActionVisibilityForTab(1)

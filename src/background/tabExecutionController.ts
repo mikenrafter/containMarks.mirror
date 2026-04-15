@@ -239,7 +239,7 @@ export class TabExecutionControllerImpl implements TabExecutionController {
 
         this.debug('pageAction visibility', { tabId, showPageActionButton: settings.showPageActionButton })
         const shown = await this.browserApi.pageAction.isShown({ tabId })
-        const desiredState = settings.showPageActionButton && tab.cookieStoreId !== NO_CONTAINER && tab.cookieStoreId !== null
+        const desiredState = settings.showPageActionButton && tab.cookieStoreId !== NO_CONTAINER && tab.cookieStoreId != null
 
         if (desiredState && !shown) {
             await this.browserApi.pageAction.show(tabId)
