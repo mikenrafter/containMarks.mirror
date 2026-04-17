@@ -49,7 +49,7 @@ import type {
 	WebRequestBeforeRequestDetails,
 	Window,
 } from '../models'
-import { ContainerMappingStore } from '../containerMappingStore'
+import { ContainerMappingStore } from '../mappings/containerMappingStore'
 import {
 	DELIMITER,
 	FRAGMENT_PREFIX,
@@ -61,7 +61,7 @@ import {
 	readLegacyReference,
 	readLegacyStorageKeys,
 } from '../urlCodec'
-import { loadSettings, saveSettings } from '../settings'
+import { loadSettings, saveSettings } from '../preferences/settings'
 
 import { HotswapHandlerImpl } from './hotswapHandler'
 import type { HotswapHandler } from './hotswapHandler'

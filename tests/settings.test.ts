@@ -5,7 +5,7 @@ import {
 	hasRiskyTokenBehavior,
 	sanitizeSettings,
 	validateSettings
-} from '../src/settings'
+} from '../src/preferences/settings'
 
 describe('settings helpers', () => {
 	it('returns defaults for invalid payloads', () => {

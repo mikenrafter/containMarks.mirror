@@ -30,7 +30,7 @@ import type {
 	LoggerLike,
 	Tab,
 } from '../models'
-import type { ContainerMappingStore } from '../containerMappingStore'
+import type { ContainerMappingStore } from '../mappings/containerMappingStore'
 import {
 	isFragmentEncodedUrl,
 	isLegacyEncodedUrl,

@@ -4,7 +4,7 @@
   "private": true,
   "description": "ContainMarks Firefox extension build and test tooling",
   "scripts": {
-    "build": "esbuild src/background.ts src/options.ts --bundle --platform=browser --format=iife --target=firefox115 --outdir=src",
+    "build": "esbuild src/background.ts src/preferences/options.ts --bundle --platform=browser --format=iife --target=firefox115 --outdir=src",
     "build:firefox": "npm run build && web-ext build --source-dir src --artifacts-dir dist --overwrite-dest",
     "build:firefox:xpi": "npm run build:firefox && node -e \"const fs=require('node:fs');const path=require('node:path');const dist='dist';const zips=fs.readdirSync(dist).filter((file)=>file.endsWith('.zip')).sort();if(zips.length===0)throw new Error('No zip artifact found in dist');const zipPath=path.join(dist,zips.at(-1));const xpiPath=zipPath.replace(/\\.zip$/,'.xpi');fs.copyFileSync(zipPath,xpiPath);console.log('Created',xpiPath);\"",
     "typecheck": "tsc --noEmit",

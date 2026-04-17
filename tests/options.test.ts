@@ -7,9 +7,9 @@ import {
 	writeLocalMappings,
 	readSyncedMappings,
 	overwriteSyncedMappings,
-} from '../src/mappingMigration'
+} from '../src/mappings/mappingMigration'
 import { getNewUrl } from '../src/urlCodec'
-import { SYNC_FOLDER_TITLE, SYNC_FOLDER_PARENT_ID, buildContainerMappingUrl, buildMappingTitle } from '../src/containerMappings'
+import { SYNC_FOLDER_TITLE, SYNC_FOLDER_PARENT_ID, buildContainerMappingUrl, buildMappingTitle } from '../src/mappings/containerMappings'
 import type { BookmarkNode, BrowserApi, ContainerMappingRecord } from '../src/models'
 
 // --- Lightweight BrowserApi mock for options page helpers ---

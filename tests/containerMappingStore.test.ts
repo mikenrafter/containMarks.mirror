@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { ContainerMappingStore } from '../src/containerMappingStore'
-import { SYNC_FOLDER_TITLE } from '../src/containerMappings'
+import { ContainerMappingStore } from '../src/mappings/containerMappingStore'
+import { SYNC_FOLDER_TITLE } from '../src/mappings/containerMappings'
 import type { BookmarkNode, BrowserApi, ContextualIdentity } from '../src/models'
 
 function createMappingStoreBrowserMock(options?: {

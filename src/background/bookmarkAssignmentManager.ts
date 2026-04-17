@@ -39,7 +39,7 @@ import type {
 	MenusOnShownInfo,
 	StorageLike,
 } from '../models'
-import type { ContainerMappingStore } from '../containerMappingStore'
+import type { ContainerMappingStore } from '../mappings/containerMappingStore'
 import {
 	decodeToRealUrl,
 	getNewUrl,

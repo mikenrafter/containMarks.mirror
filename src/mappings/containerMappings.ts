@@ -1,8 +1,8 @@
 import type {
 	BookmarkNode,
 	ContainerMappingRecord,
-} from './models'
-import { PREFIX, DELIMITER } from './urlCodec'
+} from '../models'
+import { PREFIX, DELIMITER } from '../urlCodec'
 
 export const SYNC_FOLDER_PARENT_ID = 'menu________'
 export const SYNC_FOLDER_TITLE = 'ContainMarks Sync'

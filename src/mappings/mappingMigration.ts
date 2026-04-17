@@ -15,8 +15,8 @@ import {
 	parseContainerMappingBookmark,
 	parseMappingRecord
 } from './containerMappings'
-import { FRAGMENT_PREFIX, DELIMITER, parseBookmarkUrl, decodeToRealUrl } from './urlCodec'
-import type { BookmarkNode, BrowserApi, ContainerMappingRecord } from './models'
+import { FRAGMENT_PREFIX, DELIMITER, parseBookmarkUrl, decodeToRealUrl } from '../urlCodec'
+import type { BookmarkNode, BrowserApi, ContainerMappingRecord } from '../models'
 
 function normalizeMappingRecords(records: ContainerMappingRecord[]): ContainerMappingRecord[] {
 	const byIndex = new Map<number, ContainerMappingRecord>()

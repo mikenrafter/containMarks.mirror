@@ -2,7 +2,7 @@ import { DEFAULT_SETTINGS, hasRiskyTokenBehavior, loadSettings, saveSettings } f
 import {
 	SYNC_FOLDER_PARENT_ID,
 	SYNC_FOLDER_TITLE
-} from './containerMappings'
+} from '../mappings/containerMappings'
 import {
 	readSyncedMappings,
 	readLocalMappings,
@@ -10,8 +10,8 @@ import {
 	overwriteSyncedMappings,
 	scanOrphanedBookmarks,
 	resetOrphanedBookmarks
-} from './mappingMigration'
-import type { BookmarkNode, BrowserApi, ContainMarksSettings } from './models'
+} from '../mappings/mappingMigration'
+import type { BookmarkNode, BrowserApi, ContainMarksSettings } from '../models'
 
 const RISK_LINK = 'https://gitlab.com/mikenrafter/containmarks#security'
 

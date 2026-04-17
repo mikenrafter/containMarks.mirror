@@ -7,7 +7,7 @@ import {
 	SYNC_FOLDER_PARENT_ID,
 	SYNC_FOLDER_TITLE
 } from './containerMappings'
-import type { BookmarkNode, BrowserApi, ContainerMappingRecord, ContextualIdentity, LoggerLike } from './models'
+import type { BookmarkNode, BrowserApi, ContainerMappingRecord, ContextualIdentity, LoggerLike } from '../models'
 
 interface ContainerMappingStoreOptions {
 	enableBookmarkSync: boolean

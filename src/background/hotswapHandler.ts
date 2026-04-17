@@ -40,7 +40,7 @@ import type {
 	StorageLike,
 	Tab,
 } from '../models'
-import type { ContainerMappingStore } from '../containerMappingStore'
+import type { ContainerMappingStore } from '../mappings/containerMappingStore'
 import {
 	decodeToRealUrl,
 	getNewUrl,
