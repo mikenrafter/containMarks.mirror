@@ -211,8 +211,9 @@ export class TempContainerLayerImpl implements TempContainerLayer {
 		} catch (error) {
 			this.debug('openInTempContainer: TC API call failed, falling back', error)
 			try {
-				newTab = await this.browserApi.tabs.create({ url: url + '#TC', index: tab.index + 1 })
-				await this.browserApi.tabs.remove(tab.id)
+                // fire and forget
+				this.browserApi.tabs.remove(tab.id)
+				newTab = await this.browserApi.tabs.create({ url: url + '#TC', index: tab.index })
 			} catch (fallbackError) {
 				this.debug('openInTempContainer: fallback also failed', fallbackError)
 			}

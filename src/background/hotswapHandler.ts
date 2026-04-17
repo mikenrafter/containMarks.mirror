@@ -296,14 +296,6 @@ export class HotswapHandlerImpl implements HotswapHandler {
 				return
 			}
 
-			// Open a new tab in the target container, positioned after the source tab
-			const newTab = await this.deps.browserApi.tabs.create({
-				cookieStoreId: container.cookieStoreId,
-				url,
-				index: tab.index + 1,
-			})
-            const newTabId = newTab.id
-
 			// Remove the source tab — may already be gone if TC replaced it
 			if (tab.id != null) {
 				try {
@@ -312,6 +304,13 @@ export class HotswapHandlerImpl implements HotswapHandler {
 					this.debug('activate: source tab already removed (TC may have replaced it)')
 				}
 			}
+			// Open a new tab in the target container, positioned after the source tab
+			const newTab = await this.deps.browserApi.tabs.create({
+				cookieStoreId: container.cookieStoreId,
+				url,
+				index: tab.index,
+			})
+            const newTabId = newTab.id
 
             // Cleanup orphaned TC tabs that may have been created during the redirect.
             if (preTabIds && tab.windowId != null) {

@@ -148,13 +148,6 @@ export class StandardHandlerImpl implements StandardHandler {
 				return
 			}
 
-			const newTab = await this.deps.browserApi.tabs.create({
-				cookieStoreId: container.cookieStoreId,
-				url: resolved.url,
-				index: tab.index + 1,
-			})
-            const newTabId = newTab.id
-
 			if (tab.id !== undefined) {
 				try {
 					await this.deps.browserApi.tabs.remove(tab.id)
@@ -162,6 +155,13 @@ export class StandardHandlerImpl implements StandardHandler {
 					this.debug('standardHandler.activate: source tab removal failed', removeError)
 				}
 			}
+
+            const newTab = await this.deps.browserApi.tabs.create({
+				cookieStoreId: container.cookieStoreId,
+				url: resolved.url,
+				index: tab.index,
+			})
+            const newTabId = newTab.id
 
             // Cleanup orphaned TC tabs that may have been created during the redirect.
             if (preTabIds && tab.windowId != null) {
