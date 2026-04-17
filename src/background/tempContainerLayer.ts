@@ -13,7 +13,7 @@
  *
  * Boundary contract:
  * - Receives only `BrowserApi` and `LoggerLike` — no knowledge of bookmarks, settings, or mappings.
- * - Consumers (TabExecutionController, BookmarkAssignmentManager) call through the interface.
+ * - Consumers (HotswapHandler, StandardHandler, BookmarkAssignmentManager) call through the interface.
  * - Falls back gracefully when no TC extension is installed (wrapRedirect becomes passthrough).
  *
  * Failure modes:

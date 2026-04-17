@@ -320,7 +320,7 @@ export interface HotswapRedirectInfo {
 
 /**
  * Discriminated union returned by NavigationPolicyEngine. Each variant tells
- * TabExecutionController exactly what side-effect to perform, without encoding
+ * the navigation pipeline exactly what side-effect to perform, without encoding
  * *how* to perform it.
  *
  * - `noop`: No redirect needed (already in target container, or no mapping found).

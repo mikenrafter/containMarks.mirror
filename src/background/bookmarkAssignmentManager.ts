@@ -17,7 +17,7 @@
  * - Receives `BrowserApi`, settings accessor, and `ContainerMappingStore` accessor via constructor.
  * - Exposes `hotswapRedirectMap` as a read-only getter for NavigationPolicyEngine.
  * - Does NOT directly open tabs or create windows — all redirect execution is delegated
- *   to TabExecutionController via NavigationIntent objects.
+ *   to the navigation pipeline via handler modules.
  *
  * Failure modes:
  * - Crash during hotswap: persisted records allow recovery on next startup.
