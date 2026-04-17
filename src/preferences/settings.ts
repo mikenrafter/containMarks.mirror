@@ -1,4 +1,4 @@
-import type { BrowserApi, ContainMarksSettings } from './models'
+import type { BrowserApi, ContainMarksSettings } from '../models'
 
 export const SETTINGS_STORAGE_KEY = 'containMarks.settings'
 export const DEFAULT_TARGET_FOLDER_ID = 'toolbar_____'
