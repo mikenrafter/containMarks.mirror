@@ -17,8 +17,7 @@
  * - StandardHandler: fragment-encoded bookmark URL detection and container redirect
  * - TempContainerLayer: TC/TC+ extension detection, redirect wrapping, orphan cleanup
  * - BookmarkAssignmentManager: context menu management, container resolution, bookmark encoding
- * - TabExecutionController: page action visibility and click handling only
- *
+ * - PageActionHandler: page action visibility and click handling only *
  * Startup migrations (one-time, non-recurring) are inlined here:
  * - Legacy localStorage → bookmark-based mapping migration
  * - Legacy about: scheme → fragment-encoded URL migration
@@ -72,14 +71,14 @@ import { TempContainerLayerImpl } from './tempContainerLayer'
 import type { TempContainerLayer } from './tempContainerLayer'
 import { BookmarkAssignmentManagerImpl } from './bookmarkAssignmentManager'
 import type { BookmarkAssignmentManager } from './bookmarkAssignmentManager'
-import { TabExecutionControllerImpl } from './tabExecutionController'
-import type { TabExecutionController } from './tabExecutionController'
+import { PageActionHandlerImpl } from './pageActionHandler'
+import type { PageActionHandler } from './pageActionHandler'
 
 import {
 	ENABLE_DEBUG_DEFAULT,
 	NO_CONTAINER,
 	TEMP_CONTAINER_SENTINEL,
-} from '../backgroundApp'
+} from '../constants'
 
 // Re-export constants and codec functions for external consumers (mirrors backgroundApp exports).
 export { ENABLE_DEBUG_DEFAULT, NO_CONTAINER, TEMP_CONTAINER_SENTINEL }
@@ -116,7 +115,7 @@ export interface ContainMarksRuntime {
 	readonly standardHandler: StandardHandler
 	readonly tcLayer: TempContainerLayer
 	readonly assignmentManager: BookmarkAssignmentManager
-	readonly executionController: TabExecutionController
+	readonly pageActionHandler: PageActionHandler
 
 	// --- Lifecycle ---
 
@@ -188,7 +187,7 @@ export class ContainMarksRuntimeImpl implements ContainMarksRuntime {
 	private readonly _standardHandler: StandardHandler
 	private readonly _tcLayer: TempContainerLayer
 	private readonly _bam: BookmarkAssignmentManager
-	private readonly _tec: TabExecutionController
+	private readonly _pageAction: PageActionHandler
 
 	private readonly browserApi: BrowserApi
 	private readonly storage: StorageLike
@@ -230,7 +229,8 @@ export class ContainMarksRuntimeImpl implements ContainMarksRuntime {
 			settings: () => this.settings,
 			mappingStore: (s) => this.getMappingStore(s),
 			getContainer: (q) => this._bam.getContainer(q),
-			openInTempContainer: (url, tab) => this._tcLayer.openInTempContainer(url, tab),
+			openInTempContainer: (url, tab, pre) => this._tcLayer.openInTempContainer(url, tab, pre),
+		    cleanupOrphanedTabs: (windowId: number, excludeCookieStoreId: string | null, knownTabIds: ReadonlySet<number | undefined>) => this._tcLayer.cleanupOrphanedTabs(windowId, excludeCookieStoreId || '', knownTabIds),
 		})
 
 		// Standard handler — fragment/legacy encoded URL detection and container redirect
@@ -241,21 +241,17 @@ export class ContainMarksRuntimeImpl implements ContainMarksRuntime {
 			mappingStore: (s) => this.getMappingStore(s),
 			getContainer: (q) => this._bam.getContainer(q),
 			updateBookmarkContainerUrl: (b, c) => this._bam.updateBookmarkContainerUrl(b, c),
-			openInTempContainer: (url, tab) => this._tcLayer.openInTempContainer(url, tab),
+			openInTempContainer: (url, tab, pre) => this._tcLayer.openInTempContainer(url, tab, pre),
+			cleanupOrphanedTabs: (windowId: number, excludeCookieStoreId: string | null, knownTabIds: ReadonlySet<number | undefined>) => this._tcLayer.cleanupOrphanedTabs(windowId, excludeCookieStoreId || '', knownTabIds),
 		})
 
-		// TEC — page action visibility and click handling only in this runtime.
-		// Navigation execution is handled directly by hotswap/standard handlers.
-		this._tec = new TabExecutionControllerImpl({
+		// Page action — visibility sync and click-to-bookmark
+		this._pageAction = new PageActionHandlerImpl({
 			browserApi: this.browserApi,
 			logger: this.logger,
 			settings: () => this.settings,
-			mappingStore: (s) => this.getMappingStore(s),
-			tempContainersExtensionId: () => this._tcLayer.extensionId,
-			getContainer: (q) => this._bam.getContainer(q),
 			updateBookmarkContainerUrl: (b, c) => this._bam.updateBookmarkContainerUrl(b, c),
 			isTempContainer: (c) => this._tcLayer.isTempContainer(c),
-			preHotswapTabIds: () => this._hotswapHandler.preHotswapTabIds,
 		})
 	}
 
@@ -265,7 +261,7 @@ export class ContainMarksRuntimeImpl implements ContainMarksRuntime {
 	get standardHandler(): StandardHandler { return this._standardHandler }
 	get tcLayer(): TempContainerLayer { return this._tcLayer }
 	get assignmentManager(): BookmarkAssignmentManager { return this._bam }
-	get executionController(): TabExecutionController { return this._tec }
+	get pageActionHandler(): PageActionHandler { return this._pageAction }
 
 	// --- Settings ---
 
@@ -335,7 +331,7 @@ export class ContainMarksRuntimeImpl implements ContainMarksRuntime {
 
 		await this.migrateLegacyStorage(mappingStore)
 		await this.migrateAboutBookmarks(mappingStore)
-		await this._tec.syncPageActionVisibilityForAllTabs()
+		await this._pageAction.syncPageActionVisibilityForAllTabs()
 
 		if (settings.resetTokensOnStartup) {
 			await this.refreshTokensOnStartup(mappingStore)
@@ -444,34 +440,42 @@ export class ContainMarksRuntimeImpl implements ContainMarksRuntime {
 		if (this.activatingUrls.has(url)) return
 		this.activatingUrls.add(url)
 		try {
+			// Prefer the pre-hotswap snapshot (captured at menu-hidden time).
+			// Fall back to live query for non-menu paths.
 			const preTabIds = this._hotswapHandler.preHotswapTabIds
-			await this._tcLayer.wrapRedirect(
-				async (t) => { await this._hotswapHandler.activate(url, t) },
-				tab,
-				'',
-				preTabIds,
-			)
+				?? await this.captureTabSnapshot(tab)
+			await this._hotswapHandler.activate(url, tab, preTabIds)
+		} catch (error) {
+			this.debug('activateHotswap: error', error)
 		} finally {
 			this.activatingUrls.delete(url)
 		}
 	}
 
 	/**
-	 * Opens a standard encoded bookmark URL in the correct container,
-	 * wrapped with TC orphan cleanup.
+	 * Opens a standard encoded bookmark URL in the correct container.
 	 */
 	private async activateStandard(url: string, tab: Tab): Promise<void> {
 		if (this.activatingUrls.has(url)) return
 		this.activatingUrls.add(url)
 		try {
-			await this._tcLayer.wrapRedirect(
-				async (t) => { await this._standardHandler.activate(url, t) },
-				tab,
-				'',
-			)
+			const preTabIds = await this.captureTabSnapshot(tab)
+			await this._standardHandler.activate(url, tab, preTabIds)
+		} catch (error) {
+			this.debug('activateStandard: error', error)
 		} finally {
 			this.activatingUrls.delete(url)
 		}
+	}
+
+	/**
+	 * Captures a pre-redirect tab snapshot for TC orphan detection.
+	 * Returns null when no TC extension is present or tab has no windowId.
+	 */
+	private async captureTabSnapshot(tab: Tab): Promise<ReadonlySet<number | undefined> | null> {
+		if (!this._tcLayer.isPresent() || tab.windowId == null) return null
+		const tabs = await this.browserApi.tabs.query({ windowId: tab.windowId })
+		return new Set(tabs.map(t => t.id))
 	}
 
 	// =========================================================================
@@ -493,7 +497,16 @@ export class ContainMarksRuntimeImpl implements ContainMarksRuntime {
 	readonly handleTabUpdated = async (tabId: number, changeInfo: TabChangeInfo, tab: Tab): Promise<void> => {
 		// Page action sync on load complete
 		if (changeInfo.status === 'complete' && tabId !== this.browserApi.tabs.TAB_ID_NONE) {
-			await this._tec.syncPageActionVisibilityForTab(tabId)
+			await this._pageAction.syncPageActionVisibilityForTab(tabId)
+
+			// Strip the #TC sentinel fragment appended by TempContainerLayer.openInTempContainer.
+			// The fragment prevents re-interception during the TC redirect; once the page finishes
+			// loading it's safe to clean the URL so the address bar shows the real destination.
+			const tabUrl = tab.url ?? ''
+			if (tabUrl.endsWith('#TC')) {
+				const cleanUrl = tabUrl.slice(0, -3)
+				await this.browserApi.tabs.update(tabId, { url: cleanUrl, loadReplace: true })
+			}
 		}
 
 		if (tabId === this.browserApi.tabs.TAB_ID_NONE) return
@@ -545,7 +558,7 @@ export class ContainMarksRuntimeImpl implements ContainMarksRuntime {
 	readonly handleTabActivated = async (activeInfo: TabActivatedInfo): Promise<void> => {
 		try {
 			if (activeInfo.tabId !== this.browserApi.tabs.TAB_ID_NONE) {
-				await this._tec.syncPageActionVisibilityForTab(activeInfo.tabId)
+				await this._pageAction.syncPageActionVisibilityForTab(activeInfo.tabId)
 			}
 		} catch (error) {
 			this.debug(error)
@@ -582,29 +595,18 @@ export class ContainMarksRuntimeImpl implements ContainMarksRuntime {
 
 		try {
 			const tabs = await this.browserApi.tabs.query({ windowId: window.id })
-			const initialTabIds = new Set(tabs.map(t => t.id))
 
 			for (const tab of tabs) {
 				if (!tab.url || !tab.id) continue
 
 				const hotResult = this._hotswapHandler.detect(tab.url)
 				if (hotResult === 'claim') {
-					await this._tcLayer.wrapRedirect(
-						async (t) => { await this._hotswapHandler.activate(tab.url!, t) },
-						tab,
-						'',
-						initialTabIds,
-					)
+					await this.activateHotswap(tab.url, tab)
 					continue
 				}
 
 				if (this._standardHandler.detect(tab.url) === 'claim') {
-					await this._tcLayer.wrapRedirect(
-						async (t) => { await this._standardHandler.activate(tab.url!, t) },
-						tab,
-						'',
-						initialTabIds,
-					)
+					await this.activateStandard(tab.url, tab)
 				}
 			}
 		} catch (error) {
@@ -643,8 +645,8 @@ export class ContainMarksRuntimeImpl implements ContainMarksRuntime {
 		this.browserApi.tabs.onCreated.addListener(this.handleTabCreated)
 		this.browserApi.windows.onCreated.addListener(this.handleWindowCreated)
 
-		// Page action → TEC (page action logic stays in TEC)
-		this.browserApi.pageAction.onClicked.addListener(this._tec.handlePageActionClicked)
+		// Page action → PageActionHandler
+		this.browserApi.pageAction.onClicked.addListener(this._pageAction.handlePageActionClicked)
 
 		// Bookmark events → HotswapHandler (decode/revert, anti-injection stripping)
 		this.browserApi.bookmarks.onChanged.addListener(this._hotswapHandler.handleBookmarkChanged)

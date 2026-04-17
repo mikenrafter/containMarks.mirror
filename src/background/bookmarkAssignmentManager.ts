@@ -51,7 +51,7 @@ import {
 	NO_CONTAINER,
 	TEMP_CONTAINER_SENTINEL,
 	TEMP_CONTAINERS_EXTENSION_IDS,
-} from '../backgroundApp'
+} from '../constants'
 
 /** How long to wait before reverting a hotswapped bookmark if no user edit is detected. */
 const HOTSWAP_REVERT_DELAY_MS = 200

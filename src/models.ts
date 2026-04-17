@@ -170,9 +170,10 @@ export interface ContextualIdentitiesApi {
 
 export interface TabsApi {
 	TAB_ID_NONE: number
-	create(details: Partial<{ cookieStoreId: string; url: string; index: number }>): Promise<void>
+	create(details: Partial<{ cookieStoreId: string; url: string; index: number }>): Promise<Tab>
 	remove(tabId: number): Promise<void>
 	get(tabId: number): Promise<Tab>
+	update(tabId: number, updateProperties: { url?: string, loadReplace?: boolean }): Promise<Tab>
 	query(queryInfo: { windowId?: number }): Promise<Tab[]>
 	highlight(details: { populate: boolean; tabs: number[] }): Promise<void>
 	onActivated: {

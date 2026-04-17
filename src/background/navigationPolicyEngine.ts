@@ -46,7 +46,7 @@ import {
 	isPrefixedUrl as isContainMarksUrl,
 	parseBookmarkUrl,
 } from '../urlCodec'
-import { TEMP_CONTAINER_SENTINEL } from '../backgroundApp'
+import { TEMP_CONTAINER_SENTINEL } from '../constants'
 
 export interface NavigationPolicyEngineDeps {
 	readonly browserApi: BrowserApi

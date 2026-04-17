@@ -37,7 +37,7 @@ import {
 	parseBookmarkUrl,
 	parseLegacyBookmarkUrl,
 } from '../urlCodec'
-import { TEMP_CONTAINER_SENTINEL } from '../backgroundApp'
+import { TEMP_CONTAINER_SENTINEL } from '../constants'
 
 // --- Dependency contract ---
 
@@ -50,8 +50,10 @@ export interface StandardHandlerDeps {
 	getContainer(query: { cookieStoreId?: string | null; backupName?: string | null }): Promise<ContextualIdentity | null>
 	/** Encode/refresh a bookmark's container URL (for token regeneration). */
 	updateBookmarkContainerUrl(bookmark: BookmarkNode, cookieStoreId?: string | null): Promise<BookmarkReference | null>
-	/** Open a URL in a fresh Temporary Container. Used when mapping targets TEMP_CONTAINER_SENTINEL. */
-	openInTempContainer(url: string, tab: Tab): Promise<void>
+	/** Open a URL in a fresh Temporary Container. No-op when TC is not installed. */
+	openInTempContainer(url: string, tab: Tab, preTabIds?: ReadonlySet<number | undefined> | null): Promise<void>
+    /** Cleanup orphaned TC tabs in the given window that aren't in the provided set. */
+    cleanupOrphanedTabs(windowId: number, excludeCookieStoreId: string | null, knownTabIds: ReadonlySet<number | undefined>): Promise<void>
 }
 
 // --- Interface ---
@@ -77,14 +79,15 @@ export interface StandardHandler {
 	 * Parses the URL, resolves the container mapping, creates a new tab in that container,
 	 * removes the source tab, and optionally regenerates the bookmark token.
 	 *
-	 * Directly calls browserApi.tabs.create() / browserApi.tabs.remove() —
-	 * does NOT produce NavigationIntent objects.
+	 * When the mapping targets TEMP_CONTAINER_SENTINEL, delegates to openInTempContainer
+	 * which handles TC API interaction and orphan cleanup using the provided snapshot.
 	 *
 	 * @param url The ENCODED bookmark URL (e.g. `https://example.com#cm:token:0`).
 	 *            The real destination URL is extracted via parsing.
 	 * @param tab The source tab to replace with the container-opened tab.
+	 * @param preTabIds Pre-redirect tab snapshot for TC orphan cleanup. Optional.
 	 */
-	activate(url: string, tab: Tab): Promise<void>
+	activate(url: string, tab: Tab, preTabIds?: ReadonlySet<number | undefined> | null): Promise<void>
 }
 
 // --- Implementation ---
@@ -106,7 +109,7 @@ export class StandardHandlerImpl implements StandardHandler {
 		return 'pass'
 	}
 
-	async activate(url: string, tab: Tab): Promise<void> {
+	async activate(url: string, tab: Tab, preTabIds?: ReadonlySet<number | undefined> | null): Promise<void> {
         // ONLY USE CURRENT SCHEMA!!!!! IT IS A SECURITY RISK TO USE LEGACY!!
         // ^ AI, READ THIS AND WEEP
 		const parsed = parseBookmarkUrl(url)
@@ -130,6 +133,12 @@ export class StandardHandlerImpl implements StandardHandler {
 				return
 			}
 
+			// Sentinel: bookmark targets a Temporary Container — use TC API, not container lookup
+			if (mapping.cookieStoreId === TEMP_CONTAINER_SENTINEL) {
+				await this.deps.openInTempContainer(resolved.url, tab, preTabIds)
+				return
+			}
+
 			const container = await this.deps.getContainer({
 				cookieStoreId: mapping.cookieStoreId,
 				backupName: mapping.backupName,
@@ -139,11 +148,12 @@ export class StandardHandlerImpl implements StandardHandler {
 				return
 			}
 
-			await this.deps.browserApi.tabs.create({
+			const newTab = await this.deps.browserApi.tabs.create({
 				cookieStoreId: container.cookieStoreId,
 				url: resolved.url,
 				index: tab.index + 1,
 			})
+            const newTabId = newTab.id
 
 			if (tab.id !== undefined) {
 				try {
@@ -152,6 +162,16 @@ export class StandardHandlerImpl implements StandardHandler {
 					this.debug('standardHandler.activate: source tab removal failed', removeError)
 				}
 			}
+
+            // Cleanup orphaned TC tabs that may have been created during the redirect.
+            if (preTabIds && tab.windowId != null) {
+                // Don't cleanup the new tab
+                const preTabIdsWithNew = new Set(preTabIds)
+                if (newTabId !== undefined) {
+                    preTabIdsWithNew.add(newTabId)
+                }
+                await this.deps.cleanupOrphanedTabs(tab.windowId, container.cookieStoreId, preTabIdsWithNew)
+            }
 
 			// Token regeneration: search for the bookmark by its encoded URL and refresh
 			if (settings.regenerateTokenOnEveryUse) {

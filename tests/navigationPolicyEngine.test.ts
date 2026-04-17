@@ -9,7 +9,7 @@ import type {
 	PendingInterception,
 	Tab,
 } from '../src/models'
-import { TEMP_CONTAINER_SENTINEL } from '../src/backgroundApp'
+import { TEMP_CONTAINER_SENTINEL } from '../src/constants'
 import { getNewUrl } from '../src/urlCodec'
 
 // --- Helpers ---
@@ -45,6 +45,11 @@ function createMockBrowserApi(): BrowserApi {
 			create: vi.fn().mockResolvedValue(undefined),
 			remove: vi.fn().mockResolvedValue(undefined),
 			get: vi.fn().mockImplementation(async (tabId: number) => ({
+				id: tabId,
+				index: 0,
+				cookieStoreId: 'firefox-default',
+			})),
+			update: vi.fn().mockImplementation(async (tabId: number) => ({
 				id: tabId,
 				index: 0,
 				cookieStoreId: 'firefox-default',

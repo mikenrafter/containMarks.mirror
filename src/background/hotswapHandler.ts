@@ -47,7 +47,7 @@ import {
 	isFragmentEncodedUrl,
 	parseBookmarkUrl,
 } from '../urlCodec'
-import { HOTSWAP_STORAGE_KEY, TEMP_CONTAINER_SENTINEL } from '../backgroundApp'
+import { HOTSWAP_STORAGE_KEY, TEMP_CONTAINER_SENTINEL } from '../constants'
 
 /** How long to wait before reverting a hotswapped bookmark if no user edit is detected. */
 const HOTSWAP_REVERT_DELAY_MS = 200
@@ -77,8 +77,10 @@ export interface HotswapHandlerDeps {
 	 * or the cookieStoreId is `firefox-default`.
 	 */
 	getContainer(query: { cookieStoreId?: string | null; backupName?: string | null }): Promise<ContextualIdentity | null>
-	/** Open a URL in a fresh Temporary Container. Used when mapping targets TEMP_CONTAINER_SENTINEL. */
-	openInTempContainer(url: string, tab: Tab): Promise<void>
+	/** Open a URL in a fresh Temporary Container. No-op when TC is not installed. */
+	openInTempContainer(url: string, tab: Tab, preTabIds?: ReadonlySet<number | undefined> | null): Promise<void>
+    /** Cleanup orphaned TC tabs in the given window that aren't in the provided set. */
+    cleanupOrphanedTabs(windowId: number, excludeCookieStoreId: string | null, knownTabIds: ReadonlySet<number | undefined>): Promise<void>
 }
 
 // ---------------------------------------------------------------------------
@@ -143,12 +145,13 @@ export interface HotswapHandler {
 	 * creates a new tab in that container positioned after the source tab, removes the
 	 * source tab, and extends the revert timer for the bookmark.
 	 *
-	 * Directly calls `browserApi.tabs.create()` / `browserApi.tabs.remove()` — does NOT
-	 * produce a NavigationIntent.
+	 * When the mapping targets TEMP_CONTAINER_SENTINEL, delegates to openInTempContainer
+	 * which handles TC API interaction and orphan cleanup using the provided snapshot.
 	 *
+	 * @param preTabIds Pre-redirect tab snapshot for TC orphan cleanup. Optional.
 	 * @throws Silently catches tab-removal errors (source tab may have been replaced by TC).
 	 */
-	activate(url: string, tab: Tab): Promise<void>
+	activate(url: string, tab: Tab, preTabIds?: ReadonlySet<number | undefined> | null): Promise<void>
 
 	/**
 	 * Returns info for a URL that was claimed by `detect()` but not yet activated.
@@ -263,7 +266,7 @@ export class HotswapHandlerImpl implements HotswapHandler {
 		return 'pass'
 	}
 
-	async activate(url: string, tab: Tab): Promise<void> {
+	async activate(url: string, tab: Tab, preTabIds?: ReadonlySet<number | undefined> | null): Promise<void> {
 		const info = this.consumedButNotActivated.get(url)
 		if (!info) return
 		this.consumedButNotActivated.delete(url)
@@ -277,6 +280,13 @@ export class HotswapHandlerImpl implements HotswapHandler {
 				return
 			}
 
+			// Sentinel: bookmark targets a Temporary Container — use TC API, not container lookup
+			if (mapping.cookieStoreId === TEMP_CONTAINER_SENTINEL) {
+				await this.deps.openInTempContainer(url, tab, preTabIds)
+				this.extendRevertTimer(info.bookmarkId)
+				return
+			}
+
 			const container = await this.deps.getContainer({
 				cookieStoreId: mapping.cookieStoreId,
 				backupName: mapping.backupName,
@@ -287,11 +297,12 @@ export class HotswapHandlerImpl implements HotswapHandler {
 			}
 
 			// Open a new tab in the target container, positioned after the source tab
-			await this.deps.browserApi.tabs.create({
+			const newTab = await this.deps.browserApi.tabs.create({
 				cookieStoreId: container.cookieStoreId,
 				url,
 				index: tab.index + 1,
 			})
+            const newTabId = newTab.id
 
 			// Remove the source tab — may already be gone if TC replaced it
 			if (tab.id != null) {
@@ -301,6 +312,16 @@ export class HotswapHandlerImpl implements HotswapHandler {
 					this.debug('activate: source tab already removed (TC may have replaced it)')
 				}
 			}
+
+            // Cleanup orphaned TC tabs that may have been created during the redirect.
+            if (preTabIds && tab.windowId != null) {
+                // Don't cleanup the new tab
+                const preTabIdsWithNew = new Set(preTabIds)
+                if (newTabId !== undefined) {
+                    preTabIdsWithNew.add(newTabId)
+                }
+                await this.deps.cleanupOrphanedTabs(tab.windowId, container.cookieStoreId, preTabIdsWithNew)
+            }
 
 			// Extend the revert timer so the bookmark stays decoded long enough for the
 			// redirect to complete, but still reverts if no user edit arrives.

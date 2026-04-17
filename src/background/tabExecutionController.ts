@@ -109,7 +109,7 @@ export interface TabExecutionController {
 
 // --- Implementation ---
 
-import { NO_CONTAINER, TEMP_CONTAINER_SENTINEL } from '../backgroundApp'
+import { NO_CONTAINER, TEMP_CONTAINER_SENTINEL } from '../constants'
 
 export class TabExecutionControllerImpl implements TabExecutionController {
 	private readonly browserApi: BrowserApi

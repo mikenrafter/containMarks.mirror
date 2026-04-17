@@ -9,7 +9,7 @@ import type {
 	HotswapRecord,
 	StorageLike,
 } from '../src/models'
-import { NO_CONTAINER, TEMP_CONTAINER_SENTINEL, HOTSWAP_STORAGE_KEY } from '../src/backgroundApp'
+import { NO_CONTAINER, TEMP_CONTAINER_SENTINEL, HOTSWAP_STORAGE_KEY } from '../src/constants'
 import { getNewUrl, isFragmentEncodedUrl, parseBookmarkUrl } from '../src/urlCodec'
 
 // --- Test helpers ---
@@ -50,6 +50,7 @@ function createMockBrowserApi(): BrowserApi {
 			create: vi.fn().mockResolvedValue(undefined),
 			remove: vi.fn().mockResolvedValue(undefined),
 			get: vi.fn().mockResolvedValue({ id: 1, index: 0 }),
+			update: vi.fn().mockResolvedValue({ id: 1, index: 0 }),
 			query: vi.fn().mockResolvedValue([]),
 			highlight: vi.fn().mockResolvedValue(undefined),
 			onActivated: { addListener: vi.fn() },

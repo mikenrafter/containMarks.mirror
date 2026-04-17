@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { TabExecutionControllerImpl } from '../src/background/tabExecutionController'
 import type { TabExecutionControllerDeps } from '../src/background/tabExecutionController'
 import type { BrowserApi, NavigationIntent, Tab, BookmarkNode, ContainMarksSettings } from '../src/models'
-import { NO_CONTAINER, TEMP_CONTAINER_SENTINEL } from '../src/backgroundApp'
+import { NO_CONTAINER, TEMP_CONTAINER_SENTINEL } from '../src/constants'
 
 // --- Test helpers ---
 
@@ -48,6 +48,7 @@ function createMockBrowserApi(): BrowserApi {
 			create: vi.fn().mockResolvedValue(undefined),
 			remove: vi.fn().mockResolvedValue(undefined),
 			get: vi.fn().mockImplementation(async (tabId: number) => ({ id: tabId, index: 0 })),
+			update: vi.fn().mockImplementation(async (tabId: number) => ({ id: tabId, index: 0 })),
 			query: vi.fn().mockResolvedValue([]),
 			highlight: vi.fn().mockResolvedValue(undefined),
 			onActivated: { addListener: vi.fn() },

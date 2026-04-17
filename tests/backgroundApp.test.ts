@@ -8,7 +8,7 @@ import {
 	isPrefixedUrl,
 	parseBookmarkUrl,
 	parseLegacyBookmarkUrl
-} from '../src/backgroundApp'
+} from '../src/constants'
 import { decodeToRealUrl } from '../src/urlCodec'
 import type {
 	BookmarkNode,
@@ -200,6 +200,9 @@ function createBrowserMock(options?: {
 			create: vi.fn().mockResolvedValue(undefined),
 			remove: vi.fn().mockResolvedValue(undefined),
 			get: vi.fn().mockImplementation(async (tabId: number) => {
+				return tabs.find(t => t.id === tabId) ?? { id: tabId, index: 0 }
+			}),
+			update: vi.fn().mockImplementation(async (tabId: number) => {
 				return tabs.find(t => t.id === tabId) ?? { id: tabId, index: 0 }
 			}),
 			query: vi.fn().mockResolvedValue(tabs),

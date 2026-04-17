@@ -28,7 +28,7 @@ import type {
 	LoggerLike,
 	Tab,
 } from '../models'
-import { TEMP_CONTAINERS_EXTENSION_IDS } from '../backgroundApp'
+import { TEMP_CONTAINERS_EXTENSION_IDS } from '../constants'
 
 // ---------------------------------------------------------------------------
 // Dependencies
@@ -82,8 +82,14 @@ export interface TempContainerLayer {
 	 * Open a URL in a fresh Temporary Container via the TC/TC+ runtime API.
 	 * Falls back to opening in the default container if the TC API call fails
 	 * or no TC extension is installed.
+	 *
+	 * When TC is present and `preTabIds` is provided, runs orphan cleanup after
+	 * creating the tab to remove any TC replacement tabs.
+	 *
+	 * @param preTabIds - Tab snapshot captured before the redirect, used for orphan detection.
+	 *                    When omitted, cleanup is skipped.
 	 */
-	openInTempContainer(url: string, tab: Tab): Promise<void>
+	openInTempContainer(url: string, tab: Tab, preTabIds?: ReadonlySet<number | undefined> | null): Promise<void>
 
 	/**
 	 * Check if a cookieStoreId belongs to an ephemeral Temporary Container
@@ -187,27 +193,39 @@ export class TempContainerLayerImpl implements TempContainerLayer {
 
 	// --- TC API operations ---
 
-	async openInTempContainer(url: string, tab: Tab): Promise<void> {
+	async openInTempContainer(url: string, tab: Tab, preTabIds?: ReadonlySet<number | undefined> | null): Promise<void> {
 		if (tab.id === undefined) return
+
+        let newTab: Tab | undefined = undefined
 
 		try {
 			if (!this._extensionId) throw new Error('No Temporary Containers extension detected')
 
 			this.debug('openInTempContainer: requesting createTabInTempContainer via', this._extensionId, url)
-			await this.browserApi.runtime.sendMessage(this._extensionId, {
-				method: 'createTabInTempContainer',
-				url,
-				active: true,
-			})
 			await this.browserApi.tabs.remove(tab.id)
+			newTab = await this.browserApi.runtime.sendMessage(this._extensionId, {
+				method: 'createTabInTempContainer',
+				url: url + '#TC',
+				active: true,
+			}) as Tab
 		} catch (error) {
 			this.debug('openInTempContainer: TC API call failed, falling back', error)
 			try {
-				await this.browserApi.tabs.create({ url, index: tab.index + 1 })
+				newTab = await this.browserApi.tabs.create({ url: url + '#TC', index: tab.index + 1 })
 				await this.browserApi.tabs.remove(tab.id)
 			} catch (fallbackError) {
 				this.debug('openInTempContainer: fallback also failed', fallbackError)
 			}
+		}
+
+		// Cleanup orphaned TC tabs that may have been created during the redirect.
+		if (preTabIds && tab.windowId != null) {
+            // Don't cleanup the new tab
+            const preTabIdsWithNew = new Set(preTabIds)
+            if (newTab!.id !== undefined) {
+                preTabIdsWithNew.add(newTab!.id)
+            }
+			await this.cleanupOrphanedTabs(tab.windowId, newTab?.cookieStoreId || '', preTabIdsWithNew)
 		}
 	}
 
