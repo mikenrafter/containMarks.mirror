@@ -105,6 +105,26 @@ function setStatus(message: string, isError = false): void {
 	status.style.color = isError ? '#a31515' : '#0a5f2d'
 }
 
+/**
+ * Compares current form values to the last-saved snapshot and styles the save
+ * button to signal whether manual save is needed. The sync checkbox auto-saves
+ * via its own dialog flow, so its changes don't count as "unsaved" here.
+ */
+function updateSaveButtonDirtyState(lastSaved: ContainMarksSettings): void {
+	const current = readFormValues()
+	const button = getElementById<HTMLButtonElement>('options-form-submit')
+
+	const isDirty =
+		current.targetFolderId !== lastSaved.targetFolderId ||
+		current.resetTokensOnStartup !== lastSaved.resetTokensOnStartup ||
+		current.regenerateTokenOnEveryUse !== lastSaved.regenerateTokenOnEveryUse ||
+		current.acknowledgeRiskyTokenBehavior !== lastSaved.acknowledgeRiskyTokenBehavior ||
+		current.showPageActionButton !== lastSaved.showPageActionButton
+
+	button.disabled = !isDirty
+	button.textContent = isDirty ? 'Save Settings *' : 'Save Settings'
+}
+
 function updateRiskGating(): void {
 	const ackRisks = getElementById<HTMLInputElement>('ack-risks').checked
 	const resetInput = getElementById<HTMLInputElement>('reset-tokens-on-startup')
@@ -246,8 +266,12 @@ async function initializeOptionsPage(browserApi: BrowserApi): Promise<void> {
 	/** Tracks the last-saved value of `enableBookmarkSync` so the dialog can revert on cancel. */
 	let savedSyncEnabled = settings.enableBookmarkSync
 
+	/** Snapshot of last-saved settings for dirty-state comparison (excludes sync toggle, which auto-saves). */
+	let lastSavedSettings: ContainMarksSettings = { ...settings }
+
 	getElementById<HTMLFormElement>('options-form').addEventListener('change', () => {
 		updateRiskGating()
+		updateSaveButtonDirtyState(lastSavedSettings)
 	})
 
 	/**
@@ -264,6 +288,7 @@ async function initializeOptionsPage(browserApi: BrowserApi): Promise<void> {
 			if (outcome === 'cancelled') {
 				checkbox.checked = savedSyncEnabled
 				setStatus('Migration cancelled.')
+				updateSaveButtonDirtyState(lastSavedSettings)
 				return
 			}
 
@@ -273,6 +298,8 @@ async function initializeOptionsPage(browserApi: BrowserApi): Promise<void> {
 			writeFormValues(saved)
 			updateRiskGating()
 			savedSyncEnabled = saved.enableBookmarkSync
+			lastSavedSettings = { ...saved }
+			updateSaveButtonDirtyState(lastSavedSettings)
 
 			if (outcome === 'reset') {
 				setStatus('Switched storage mode and reset orphaned bookmarks.')
@@ -292,6 +319,8 @@ async function initializeOptionsPage(browserApi: BrowserApi): Promise<void> {
 			writeFormValues(saved)
 			updateRiskGating()
 			savedSyncEnabled = saved.enableBookmarkSync
+			lastSavedSettings = { ...saved }
+			updateSaveButtonDirtyState(lastSavedSettings)
 			setStatus(hasRiskyTokenBehavior(saved) ? 'Saved with custom token retention settings.' : 'Saved.')
 		} catch (error) {
 			setStatus(`Failed to save settings: ${String(error)}`, true)

@@ -43,6 +43,18 @@
 				background: #f6f8fa;
 				cursor: pointer;
 			}
+			button[type="submit"] {
+				transition: background 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s;
+			}
+			button[type="submit"]:disabled {
+				opacity: 0.5;
+				cursor: default;
+			}
+			button[type="submit"]:not(:disabled) {
+				background: #1f6feb;
+				border-color: #1f6feb;
+				color: white;
+			}
 			#save-status {
 				min-height: 20px;
 			}
@@ -114,7 +126,7 @@
 					</label>
 				</fieldset>
 
-				<button type="submit">Save Settings</button>
+				<button type="submit" id="options-form-submit" disabled>Save Settings</button>
 				<p id="save-status" aria-live="polite"></p>
 			</form>
 		</main>
