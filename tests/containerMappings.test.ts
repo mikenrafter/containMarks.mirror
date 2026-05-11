@@ -4,7 +4,7 @@ import {
 	buildContainerMappingUrl,
 	parseContainerMappingUrl,
 	parseContainerMappingBookmark
-} from '../src/containerMappings'
+} from '../src/mappings/containerMappings'
 
 describe('container mapping urls', () => {
 	it('builds and parses mapping URLs', () => {

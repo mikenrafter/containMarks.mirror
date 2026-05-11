@@ -2,4 +2,5 @@ node_modules/
 coverage/
 *.tsbuildinfo
 dist/
-src/*.js
+src/**.js
+.diffcore/*

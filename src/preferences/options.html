@@ -43,6 +43,18 @@
 				background: #f6f8fa;
 				cursor: pointer;
 			}
+			button[type="submit"] {
+				transition: background 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s;
+			}
+			button[type="submit"]:disabled {
+				opacity: 0.5;
+				cursor: default;
+			}
+			button[type="submit"]:not(:disabled) {
+				background: #1f6feb;
+				border-color: #1f6feb;
+				color: white;
+			}
 			#save-status {
 				min-height: 20px;
 			}
@@ -112,25 +124,25 @@
 						<input type="checkbox" id="enable-bookmark-sync" checked />
 						Enable bookmark synchronization across devices
 					</label>
-					<button type="button" id="translate-mappings-button"></button>
-					<p id="translate-mappings-description">
-						This will OVERWRITE the <strong id="translate-target-label"></strong> container mappings, but will not erase the
-						<strong id="translate-source-label"></strong> container mappings.
-					</p>
 				</fieldset>
 
-				<button type="submit">Save Settings</button>
+				<button type="submit" id="options-form-submit" disabled>Save Settings</button>
 				<p id="save-status" aria-live="polite"></p>
 			</form>
 		</main>
 		<script src="options.js"></script>
-		<dialog id="confirm-transfer-dialog">
-			<h2>Overwrite container mappings?</h2>
-			<p>This cannot be undone. The final mappings will be:</p>
-			<ul id="confirm-transfer-preview"></ul>
+		<dialog id="migrate-mappings-dialog">
+			<h2>Migrate container mappings</h2>
+			<p id="migrate-description"></p>
+			<div id="migrate-orphan-warning" style="display:none">
+				<p><strong id="migrate-orphan-count"></strong> encoded bookmark(s) reference containers that don't exist in the target store.</p>
+			</div>
+			<p id="migrate-records-heading">Mappings to transfer:</p>
+			<ul id="migrate-records-preview"></ul>
 			<menu>
-				<button id="confirm-transfer-cancel" type="button">Cancel</button>
-				<button id="confirm-transfer-ok" type="button" class="overwrite">Overwrite</button>
+				<button id="migrate-cancel" type="button">Cancel and revert</button>
+				<button id="migrate-reset" type="button" style="display:none">Reset orphaned bookmarks</button>
+				<button id="migrate-overwrite" type="button" class="overwrite">Overwrite old mappings</button>
 			</menu>
 		</dialog>
 	</body>

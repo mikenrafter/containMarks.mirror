@@ -5,7 +5,7 @@ import {
 	hasRiskyTokenBehavior,
 	sanitizeSettings,
 	validateSettings
-} from '../src/settings'
+} from '../src/preferences/settings'
 
 describe('settings helpers', () => {
 	it('returns defaults for invalid payloads', () => {
@@ -25,7 +25,8 @@ describe('settings helpers', () => {
 			regenerateTokenOnEveryUse: false,
 			acknowledgeRiskyTokenBehavior: false,
 			showPageActionButton: true,
-			enableBookmarkSync: true
+			enableBookmarkSync: true,
+			allowEncodedBookmarkImport: false
 		})
 	})
 
@@ -36,7 +37,8 @@ describe('settings helpers', () => {
 			regenerateTokenOnEveryUse: false,
 			acknowledgeRiskyTokenBehavior: false,
 			showPageActionButton: true,
-			enableBookmarkSync: true
+			enableBookmarkSync: true,
+			allowEncodedBookmarkImport: false
 		})
 
 		expect(validated).toEqual({
@@ -45,7 +47,8 @@ describe('settings helpers', () => {
 			regenerateTokenOnEveryUse: true,
 			acknowledgeRiskyTokenBehavior: false,
 			showPageActionButton: true,
-			enableBookmarkSync: true
+			enableBookmarkSync: true,
+			allowEncodedBookmarkImport: false
 		})
 	})
 
@@ -56,7 +59,8 @@ describe('settings helpers', () => {
 			regenerateTokenOnEveryUse: true,
 			acknowledgeRiskyTokenBehavior: false,
 			showPageActionButton: true,
-			enableBookmarkSync: true
+			enableBookmarkSync: true,
+			allowEncodedBookmarkImport: false
 		})).toBe(false)
 
 		expect(hasRiskyTokenBehavior({
@@ -65,7 +69,8 @@ describe('settings helpers', () => {
 			regenerateTokenOnEveryUse: true,
 			acknowledgeRiskyTokenBehavior: true,
 			showPageActionButton: true,
-			enableBookmarkSync: true
+			enableBookmarkSync: true,
+			allowEncodedBookmarkImport: false
 		})).toBe(true)
 	})
 })

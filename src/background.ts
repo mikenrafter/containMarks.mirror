@@ -1,4 +1,4 @@
-import { BackgroundApp } from './backgroundApp'
+import { ContainMarksRuntimeImpl } from './background/containMarksRuntime'
 import type { BrowserApi } from './models'
 
 declare global {
@@ -8,5 +8,10 @@ declare global {
 	}
 }
 
-const app = new BackgroundApp(globalThis.browser, globalThis.localStorage, console)
-app.initialize()
+const runtime = new ContainMarksRuntimeImpl({
+	browserApi: globalThis.browser,
+	storage: globalThis.localStorage,
+	logger: console,
+	randomValue: Math.random,
+})
+runtime.initialize()

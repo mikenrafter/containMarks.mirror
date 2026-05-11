@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { ContainerMappingStore } from '../src/containerMappingStore'
-import { SYNC_FOLDER_TITLE } from '../src/containerMappings'
+import { ContainerMappingStore } from '../src/mappings/containerMappingStore'
+import { SYNC_FOLDER_TITLE } from '../src/mappings/containerMappings'
 import type { BookmarkNode, BrowserApi, ContextualIdentity } from '../src/models'
 
 function createMappingStoreBrowserMock(options?: {
@@ -76,6 +76,12 @@ function createMappingStoreBrowserMock(options?: {
 		}),
 		onRemoved: {
 			addListener: vi.fn()
+		},
+		onChanged: {
+			addListener: vi.fn()
+		},
+		onCreated: {
+			addListener: vi.fn()
 		}
 	}
 
@@ -86,7 +92,8 @@ function createMappingStoreBrowserMock(options?: {
 			refresh: vi.fn(),
 			removeAll: vi.fn(),
 			onClicked: { addListener: vi.fn() },
-			onShown: { addListener: vi.fn() }
+			onShown: { addListener: vi.fn() },
+			onHidden: { addListener: vi.fn() }
 		},
 		contextualIdentities: {
 			query: vi.fn().mockResolvedValue([]),
@@ -96,18 +103,42 @@ function createMappingStoreBrowserMock(options?: {
 			TAB_ID_NONE: -1,
 			create: vi.fn().mockResolvedValue(undefined),
 			remove: vi.fn().mockResolvedValue(undefined),
+			get: vi.fn().mockResolvedValue({ id: 0, index: 0 }),
+			update: vi.fn().mockResolvedValue({ id: 0, index: 0 }),
 			query: vi.fn().mockResolvedValue([]),
 			highlight: vi.fn().mockResolvedValue(undefined),
 			onActivated: { addListener: vi.fn() },
-			onUpdated: { addListener: vi.fn() }
+			onUpdated: { addListener: vi.fn() },
+			onCreated: { addListener: vi.fn() }
+		},
+		windows: {
+			onCreated: { addListener: vi.fn() }
 		},
 		notifications: {
 			create: vi.fn().mockResolvedValue('notification-id')
 		},
 		pageAction: {
+			isShown: vi.fn().mockResolvedValue(false),
+			setTitle: vi.fn().mockResolvedValue(undefined),
 			show: vi.fn().mockResolvedValue(undefined),
 			hide: vi.fn().mockResolvedValue(undefined),
 			onClicked: { addListener: vi.fn() }
+		},
+		webNavigation: {
+			onBeforeNavigate: {
+				addListener: vi.fn()
+			}
+		},
+		webRequest: {
+			onBeforeRequest: {
+				addListener: vi.fn()
+			}
+		},
+		management: {
+			get: vi.fn().mockRejectedValue(new Error('Extension not found'))
+		},
+		runtime: {
+			sendMessage: vi.fn().mockResolvedValue(undefined)
 		},
 		storage: {
 			local: {

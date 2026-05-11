@@ -1,7 +1,7 @@
 {
 	"name": "ContainMarks",
 	"description": "Natively and easily edit and open bookmarks in multi-account containers.",
-	"version": "1.1.5",
+	"version": "1.2.0",
 	"manifest_version": 2,
 
 	"author": "Mikenrafter",
@@ -16,7 +16,12 @@
 		"cookies",
 		"storage",
 		"unlimitedStorage",
-		"notifications"
+		"notifications",
+		"webNavigation",
+		"webRequest",
+		"webRequestBlocking",
+		"management",
+		"<all_urls>"
 	],
 
 	"background": {
@@ -24,7 +29,7 @@
 	},
 
 	"options_ui": {
-		"page": "options.html",
+		"page": "preferences/options.html",
 		"open_in_tab": false,
 		"browser_style": true
 	},
@@ -45,8 +50,7 @@
 			"96":  "icons/icon-mini.svg",
 			"128": "icons/icon-mini.svg"
 		},
-		"default_title": "Bookmark this URL inside this container.",
-		"show_matches": ["<all_urls>"]
+		"default_title": "Bookmark this URL inside this container."
 	},
 
 	"browser_specific_settings": {

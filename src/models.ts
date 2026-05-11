@@ -33,12 +33,20 @@ export interface ContainMarksSettings {
 	acknowledgeRiskyTokenBehavior: boolean
 	showPageActionButton: boolean
 	enableBookmarkSync: boolean
+	/** When true, newly-created bookmarks with `#cm:` encoding are not auto-stripped.
+	 *  Useful during bookmark import/transfer. Reverts to `false` on every extension startup. */
+	allowEncodedBookmarkImport: boolean
 }
 
 export interface ContainerMappingRecord {
 	firstSeenIndex: number
 	cookieStoreId: string
 	backupName: string
+}
+
+export interface BookmarkTokenSource {
+	value?: string
+	seed?: () => number
 }
 
 export interface ContextualIdentity {
@@ -88,6 +96,12 @@ export interface Tab {
 	index: number
 	title?: string
 	cookieStoreId?: string
+	windowId?: number
+}
+
+export interface Window {
+	id?: number
+	tabs?: Tab[]
 }
 
 export interface MenusCreateDetails {
@@ -126,6 +140,12 @@ export interface BookmarksApi {
 	onRemoved: {
 		addListener(listener: (id: string, info: { node: BookmarkNode }) => void | Promise<void>): void
 	}
+	onChanged: {
+		addListener(listener: (id: string, changeInfo: { url?: string; title?: string }) => void | Promise<void>): void
+	}
+	onCreated: {
+		addListener(listener: (id: string, bookmark: BookmarkNode) => void | Promise<void>): void
+	}
 }
 
 export interface MenusApi {
@@ -138,6 +158,9 @@ export interface MenusApi {
 	onShown: {
 		addListener(listener: (info: MenusOnShownInfo) => void | Promise<void>): void
 	}
+	onHidden: {
+		addListener(listener: () => void | Promise<void>): void
+	}
 }
 
 export interface ContextualIdentitiesApi {
@@ -147,15 +170,26 @@ export interface ContextualIdentitiesApi {
 
 export interface TabsApi {
 	TAB_ID_NONE: number
-	create(details: { cookieStoreId: string; url: string; index: number }): Promise<void>
+	create(details: Partial<{ cookieStoreId: string; url: string; index: number }>): Promise<Tab>
 	remove(tabId: number): Promise<void>
-	query(queryInfo: Record<string, never>): Promise<Tab[]>
+	get(tabId: number): Promise<Tab>
+	update(tabId: number, updateProperties: { url?: string, loadReplace?: boolean }): Promise<Tab>
+	query(queryInfo: { windowId?: number }): Promise<Tab[]>
 	highlight(details: { populate: boolean; tabs: number[] }): Promise<void>
 	onActivated: {
 		addListener(listener: (activeInfo: TabActivatedInfo) => void | Promise<void>): void
 	}
 	onUpdated: {
 		addListener(listener: (id: number, changeInfo: TabChangeInfo, tab: Tab) => void | Promise<void>): void
+	}
+	onCreated: {
+		addListener(listener: (tab: Tab) => void | Promise<void>): void
+	}
+}
+
+export interface WindowsApi {
+	onCreated: {
+		addListener(listener: (window: Window) => void | Promise<void>): void
 	}
 }
 
@@ -164,6 +198,8 @@ export interface NotificationsApi {
 }
 
 export interface PageActionApi {
+	isShown(request: { tabId: number }): Promise<boolean>
+	setTitle(details: { tabId: number; title: string }): Promise<void>
 	show(tabId: number): Promise<void>
 	hide(tabId: number): Promise<void>
 	onClicked: {
@@ -171,13 +207,74 @@ export interface PageActionApi {
 	}
 }
 
+export interface WebNavigationBeforeNavigateDetails {
+	tabId: number
+	url: string
+	frameId: number
+}
+
+export interface WebNavigationApi {
+	onBeforeNavigate: {
+		addListener(
+			listener: (details: WebNavigationBeforeNavigateDetails) => void | Promise<void>,
+			filter?: { url: Array<{ urlContains?: string }> }
+		): void
+	}
+}
+
+export interface WebRequestBeforeRequestDetails {
+	requestId: string
+	tabId: number
+	url: string
+	type: string
+}
+
+export interface BlockingResponse {
+	cancel?: boolean
+}
+
+export interface WebRequestApi {
+	onBeforeRequest: {
+		addListener(
+			listener: (details: WebRequestBeforeRequestDetails) => BlockingResponse | void,
+			filter: { urls: string[]; types?: string[] },
+			extraInfoSpec?: string[]
+		): void
+	}
+}
+
+export interface ExtensionInfo {
+	id: string
+	name: string
+	enabled: boolean
+	type: string
+}
+
+/** Subset of browser.management used to detect companion extensions (e.g., Temporary Containers Plus). */
+export interface ManagementApi {
+	get(extensionId: string): Promise<ExtensionInfo>
+}
+
+/**
+ * Subset of browser.runtime used for cross-extension messaging. The sendMessage overload here
+ * targets a specific extension by ID — used to invoke the TC+ API.
+ */
+export interface RuntimeApi {
+	sendMessage(extensionId: string, message: Record<string, unknown>): Promise<unknown>
+}
+
 export interface BrowserApi {
 	bookmarks: BookmarksApi
 	menus: MenusApi
 	contextualIdentities: ContextualIdentitiesApi
 	tabs: TabsApi
+	windows: WindowsApi
 	notifications: NotificationsApi
 	pageAction: PageActionApi
+	webNavigation: WebNavigationApi
+	webRequest: WebRequestApi
+	management: ManagementApi
+	runtime: RuntimeApi
 	storage: {
 		local: {
 			get(keys?: string | string[] | Record<string, unknown> | null): Promise<Record<string, unknown>>
@@ -189,3 +286,50 @@ export interface BrowserApi {
 export interface LoggerLike {
 	log: (...args: unknown[]) => void
 }
+
+// --- Navigation intent types (shared vocabulary for module boundaries) ---
+
+/**
+ * A bookmark URL that was temporarily decoded ("hotswapped") so the native Properties
+ * dialog shows the clean URL. Persisted to storage for crash safety.
+ */
+export interface HotswapRecord {
+	encodedUrl: string
+	containerIndex: number
+}
+
+/**
+ * A tab navigation that was flagged by `onBeforeNavigate` (which can read fragment) and
+ * is awaiting cancellation by `onBeforeRequest`. Short-lived: deleted once the request
+ * is cancelled and the async redirect fires.
+ */
+export interface PendingInterception {
+	containerIndex: number
+	realUrl: string
+	encodedUrl: string
+}
+
+/**
+ * Info attached to a decoded URL during a hotswap window, so that new-tab/new-window
+ * navigations to the decoded URL can be intercepted and reopened in the correct container.
+ */
+export interface HotswapRedirectInfo {
+	containerIndex: number
+	bookmarkId: string
+}
+
+/**
+ * Discriminated union returned by NavigationPolicyEngine. Each variant tells
+ * the navigation pipeline exactly what side-effect to perform, without encoding
+ * *how* to perform it.
+ *
+ * - `noop`: No redirect needed (already in target container, or no mapping found).
+ * - `redirect`: Open the URL in a specific container, closing the source tab.
+ * - `redirect-temp`: Open the URL in a fresh Temporary Container.
+ * - `reset-token`: After redirect, regenerate the bookmark's token (when settings require it).
+ */
+export type NavigationIntent =
+	| { readonly action: 'noop' }
+	| { readonly action: 'redirect'; readonly cookieStoreId: string; readonly url: string }
+	| { readonly action: 'redirect-temp'; readonly url: string }
+	| { readonly action: 'reset-token'; readonly cookieStoreId: string; readonly url: string; readonly bookmark: BookmarkNode }
