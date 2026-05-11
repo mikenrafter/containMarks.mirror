@@ -3,3 +3,4 @@ coverage/
 *.tsbuildinfo
 dist/
 src/**.js
+.diffcore/*
