@@ -12,7 +12,7 @@ Quickly bookmark the current page + container combo:
 ![Omnibar usage example](./product-page/usage-omnibar.gif)
 
 Assign a container from the bookmark context menu:  
-![Context menu usage example](./product-page/usage-context.png)
+![Context menu usage example](./product-page/usage-context.gif)
 
 Easily edit assigned bookmarks with the native bookmark UI:  
 ![Edit usage example](./product-page/usage-edit.gif)
