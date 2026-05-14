@@ -2,32 +2,61 @@
 
 Natively and easily edit and open bookmarks in multi-account containers.
 
-Get it [here! <img src="./src/icons/icon.svg" width="200" height="200" alt="A bookmark embedded in a star, the addon's icon."/>](https://addons.mozilla.org/en-US/firefox/addon/containmarks/)
+<p align="left">
+  <a href="https://addons.mozilla.org/en-US/firefox/addon/containmarks/">
+    <img src="https://github.com/kazcfz/Browser-Promotional-Badges/raw/refs/heads/main/Mozilla/Firefox/Get%20The%20Add-On.svg" height="60px" alt="Get the Add-On on Mozilla-Addons-Store">
+    <img src="./src/icons/icon.svg" width="60px" height="60px" alt="A bookmark embedded in a star, the addon's icon."/>
+  </a>
+</p>
 
 ---
 
+## Compatability
+
+This extension works well with both [*Temporary Containers* on the Mozilla-Addons-Store](https://addons.mozilla.org/en-US/firefox/addon/temporary-containers/) and [*Temporary Containers Plus* on the Mozilla-Addons-Store](https://addons.mozilla.org/en-US/firefox/addon/temporary-containers-plus/).
+
 ## Usage
 
-Quickly bookmark the current page + container combo:  
+<details>
+<summary>Quickly bookmark the current page + container combo</summary>
+
 ![Omnibar usage example](./product-page/usage-omnibar.gif)
 
-Assign a container from the bookmark context menu:  
+</details>
+
+<details>
+<summary>Assign a container from the bookmark context menu</summary>
+
 ![Context menu usage example](./product-page/usage-context.gif)
 
-Easily edit assigned bookmarks with the native bookmark UI:  
+</details>
+
+<details>
+<summary>Easily edit assigned bookmarks with the native bookmark UI</summary>
+
 ![Edit usage example](./product-page/usage-edit.gif)
 
-Assign whole folders in one pass:  
+</details>
+
+<details>
+<summary>Assign whole folders in one pass</summary>
+
 ![Folder assignment usage example](./product-page/usage-folder.gif)
 
-Choose where quick bookmarks are saved from the options page:  
+</details>
+
+<details>
+<summary>Choose where quick bookmarks are saved from the options page</summary>
+
 ![Set target folder](./product-page/usage-target.png)
+
+</details>
 
 ---
 
 ## Security
 
-ContainMarks prefixes a one-time code (a token) to all assigned bookmarks. This ensures only bookmarked pairings open in the assigned container.  
+ContainMarks attaches a one-time code (a token) to all assigned bookmarks. This ensures only bookmarked pairings open in the assigned container.  
 If you experience any issues with stale tokens, the extension preferences page ([read more below](#token-retention-options)) may be able to help.
 
 ## Sync
@@ -43,15 +72,47 @@ ContainMarks now works with Firefox Sync / bookmark transfer methods.
 
 ---
 
+# Contribution
+
+Test your code well before submitting it.
+
+## Development Build
+
+Using the Nix development shell (recommended in this repo), generate a Firefox extension package:
+
+```bash
+nix develop -c npm install
+nix develop -c npm run build:firefox
+```
+
+Or without Nix (if `node` and `npm` are already installed):
+
+```bash
+npm install
+npm run build:firefox
+```
+
+This writes `dist/*.zip` (the standard WebExtension build artifact). For a local unsigned `.xpi` file:
+
+```bash
+nix develop -c npm run build:firefox:xpi
+```
+
+---
+
 # Slightly more technical details
 
 ## Security Tokens
 
-When a bookmark is assigned to a container, it's assigned a random token.  
-It's prepended to the existing URL, as well as the prefix `about`.  
-E.G. `https://example.com` -> `about:r4nD0Mt_k3n:4:https://example.com`
+When a bookmark is assigned to a container, it receives a random token and a stable container index. The assignment is embedded in the URL's fragment, so the real URL remains intact and navigable.  
+E.G. `https://example.com` -> `https://example.com#cm:r4nD0Mt_k3n:4`
 
-The middle number is the stable, first-seen container mapping index.
+If the original URL already had a fragment (e.g. `https://example.com#section`), it is preserved after the encoding:  
+`https://example.com#cm:r4nD0Mt_k3n:4#section`
+
+The number is the stable, first-seen container mapping index.
+
+**This token is hidden when the user goes to edit the bookmark**. It is hotswapped back in when the bookmark is saved. This makes native bookmark editing possible without exposing the internal workings of the extension or requiring users to not mess with the token in the URL. This is a slight oversimplification, but this is ~90% correct. Read the code for the full details.
 
 ## Sync Mapping Folder
 
@@ -86,6 +147,8 @@ The page-action shortcut always creates a bookmark for the current tab URL.
 
 This separation keeps encoded URL rules and sync mapping persistence independent from browser event wiring.
 
+---
+
 ## Made with ideas from
 
 - [*Container Bookmarks* on the Mozilla-Addons-Store](https://addons.mozilla.org/en-US/firefox/addon/container_bookmarks/)
@@ -95,31 +158,3 @@ This separation keeps encoded URL rules and sync mapping persistence independent
 
 All code is licensed under the MIT License.  
 Because innovation is desirable.
-
----
-
-# Contribution
-
-Test your code well before submitting PRs.
-
-## Development Build
-
-Using the Nix development shell (recommended in this repo), generate a Firefox extension package:
-
-```bash
-nix develop -c npm install
-nix develop -c npm run build:firefox
-```
-
-Or without Nix (if `node` and `npm` are already installed):
-
-```bash
-npm install
-npm run build:firefox
-```
-
-This writes `dist/*.zip` (the standard WebExtension build artifact). For a local unsigned `.xpi` file:
-
-```bash
-nix develop -c npm run build:firefox:xpi
-```

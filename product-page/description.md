@@ -6,6 +6,8 @@ Natively and easily edit and open bookmarks in multi-account containers.
 
 ## Usage
 
+(see the screenshots above, or head to the [repository](https://gitlab.com/mikenrafter/containMarks/-/blob/main/README.md) for gifs)
+
 - Quickly bookmark the current page + container combo
 - Assign a container from the bookmark context menu
 - Easily edit assigned bookmarks with the native bookmark UI
@@ -16,7 +18,7 @@ Natively and easily edit and open bookmarks in multi-account containers.
 
 ## Security
 
-ContainMarks prefixes a one-time code (a token) to all assigned bookmarks. This ensures only bookmarked pairings open in the assigned container.  
+ContainMarks attaches a one-time code (a token) to all assigned bookmarks. This ensures only bookmarked pairings open in the assigned container.  
 If you experience any issues with stale tokens, the extension preferences page ([read more below](#token-retention-options)) may be able to help.
 
 ## Sync
@@ -35,11 +37,15 @@ ContainMarks now works with Firefox Sync / bookmark transfer methods.
 
 ## Security Tokens
 
-When a bookmark is assigned to a container, it's assigned a random token.  
-It's prepended to the existing URL, as well as the prefix `about`.  
-E.G. `https://example.com` -> `about:r4nD0Mt_k3n:4:https://example.com`
+When a bookmark is assigned to a container, it receives a random token and a stable container index. The assignment is embedded in the URL's fragment, so the real URL remains intact and navigable.  
+E.G. `https://example.com` -> `https://example.com#cm:r4nD0Mt_k3n:4`
 
-The middle number is the stable, first-seen container mapping index.
+If the original URL already had a fragment (e.g. `https://example.com#section`), it is preserved after the encoding:  
+`https://example.com#cm:r4nD0Mt_k3n:4#section`
+
+The number is the stable, first-seen container mapping index.
+
+**This token is hidden when the user goes to edit the bookmark**. It is hotswapped back in when the bookmark is saved. This makes native bookmark editing possible without exposing the internal workings of the extension or requiring users to not mess with the token in the URL. This is a slight oversimplification, but this is ~90% correct. Read the code for the full details.
 
 ## Sync Mapping Folder
 
