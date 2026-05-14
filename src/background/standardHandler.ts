@@ -103,6 +103,26 @@ export class StandardHandlerImpl implements StandardHandler {
 		this.deps.logger.log(...args)
 	}
 
+	private async shouldOpenBeforeClose(tab: Tab): Promise<boolean> {
+		if (tab.windowId == null) return false
+		try {
+			const windowTabs = await this.deps.browserApi.tabs.query({ windowId: tab.windowId })
+			return windowTabs.length <= 1
+		} catch (error) {
+			this.debug('standardHandler.activate: failed to count tabs in window', error)
+			return false
+		}
+	}
+
+	private async removeSourceTab(tab: Tab): Promise<void> {
+		if (tab.id === undefined) return
+		try {
+			await this.deps.browserApi.tabs.remove(tab.id)
+		} catch (removeError) {
+			this.debug('standardHandler.activate: source tab removal failed', removeError)
+		}
+	}
+
 	detect(url: string): 'claim' | 'pass' {
 		if (isFragmentEncodedUrl(url)) return 'claim'
 		if (isLegacyEncodedUrl(url)) return 'claim'
@@ -148,19 +168,24 @@ export class StandardHandlerImpl implements StandardHandler {
 				return
 			}
 
-			if (tab.id !== undefined) {
-				try {
-					await this.deps.browserApi.tabs.remove(tab.id)
-				} catch (removeError) {
-					this.debug('standardHandler.activate: source tab removal failed', removeError)
-				}
-			}
+			const openBeforeClose = await this.shouldOpenBeforeClose(tab)
+			let newTab: Tab
 
-            const newTab = await this.deps.browserApi.tabs.create({
-				cookieStoreId: container.cookieStoreId,
-				url: resolved.url,
-				index: tab.index,
-			})
+			if (openBeforeClose) {
+				newTab = await this.deps.browserApi.tabs.create({
+					cookieStoreId: container.cookieStoreId,
+					url: resolved.url,
+					index: tab.index,
+				})
+				await this.removeSourceTab(tab)
+			} else {
+				await this.removeSourceTab(tab)
+				newTab = await this.deps.browserApi.tabs.create({
+					cookieStoreId: container.cookieStoreId,
+					url: resolved.url,
+					index: tab.index,
+				})
+			}
             const newTabId = newTab.id
 
             // Cleanup orphaned TC tabs that may have been created during the redirect.

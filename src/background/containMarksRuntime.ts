@@ -622,7 +622,12 @@ export class ContainMarksRuntimeImpl implements ContainMarksRuntime {
 	private registerListeners(): void {
 		// Menu events — HotswapHandler owns the decode/revert lifecycle,
 		// BAM owns menu click handling and menu item construction.
-		this.browserApi.menus.onClicked.addListener(this._bam.handleMenuClick)
+		this.browserApi.menus.onClicked.addListener((info) => {
+			void (async () => {
+				await this._hotswapHandler.inhibitForBookmark(info.bookmarkId)
+				await this._bam.handleMenuClick(info)
+			})()
+		})
 		this.browserApi.menus.onShown.addListener((info: MenusOnShownInfo) => {
 			void this._hotswapHandler.handleMenuShown(info, async (bookmark: BookmarkNode) => {
 				this.browserApi.menus.removeAll()

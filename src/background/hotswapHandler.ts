@@ -125,6 +125,15 @@ export interface HotswapHandler {
 	 */
 	readonly lockedUrls: ReadonlySet<string>
 
+	/**
+	 * Cancels any active hotswap lifecycle for the given bookmark.
+	 *
+	 * Used when the user selects an assignment action from the context menu
+	 * (assign, unassign, or temp-container sentinel). This prevents stale
+	 * hotswap records from re-applying the old container via onChanged/onHidden.
+	 */
+	inhibitForBookmark(bookmarkId: string): Promise<void>
+
 	// --- Detection / Activation pipeline ---
 
 	/**
@@ -251,6 +260,41 @@ export class HotswapHandlerImpl implements HotswapHandler {
 		return info
 	}
 
+	async inhibitForBookmark(bookmarkId: string): Promise<void> {
+		if (this.pendingEditBookmark?.id === bookmarkId) {
+			this.pendingEditBookmark = null
+		}
+
+		this.cancelHotswapTimer(bookmarkId)
+
+		const record = this.hotswapRecords.get(bookmarkId)
+		if (record) {
+			const decodedUrl = decodeToRealUrl(record.encodedUrl)
+			this._hotswapRedirectMap.delete(decodedUrl)
+			this.consumedButNotActivated.delete(decodedUrl)
+			this._lockedUrls.delete(decodedUrl)
+
+			this.hotswapRecords.delete(bookmarkId)
+			await this.persistHotswapRecords()
+		}
+
+		const pendingUrls = [...this._hotswapRedirectMap.entries()]
+			.filter(([, info]) => info.bookmarkId === bookmarkId)
+			.map(([url]) => url)
+		for (const url of pendingUrls) {
+			this._hotswapRedirectMap.delete(url)
+			this._lockedUrls.delete(url)
+		}
+
+		const consumedUrls = [...this.consumedButNotActivated.entries()]
+			.filter(([, info]) => info.bookmarkId === bookmarkId)
+			.map(([url]) => url)
+		for (const url of consumedUrls) {
+			this.consumedButNotActivated.delete(url)
+			this._lockedUrls.delete(url)
+		}
+	}
+
 	// --- Detection / Activation pipeline ---
 
 	detect(url: string): 'claim' | 'locked' | 'pass' {
@@ -296,20 +340,24 @@ export class HotswapHandlerImpl implements HotswapHandler {
 				return
 			}
 
-			// Remove the source tab — may already be gone if TC replaced it
-			if (tab.id != null) {
-				try {
-					await this.deps.browserApi.tabs.remove(tab.id)
-				} catch {
-					this.debug('activate: source tab already removed (TC may have replaced it)')
-				}
+			const openBeforeClose = await this.shouldOpenBeforeClose(tab)
+			let newTab: Tab
+
+			if (openBeforeClose) {
+				newTab = await this.deps.browserApi.tabs.create({
+					cookieStoreId: container.cookieStoreId,
+					url,
+					index: tab.index,
+				})
+				await this.removeSourceTab(tab)
+			} else {
+				await this.removeSourceTab(tab)
+				newTab = await this.deps.browserApi.tabs.create({
+					cookieStoreId: container.cookieStoreId,
+					url,
+					index: tab.index,
+				})
 			}
-			// Open a new tab in the target container, positioned after the source tab
-			const newTab = await this.deps.browserApi.tabs.create({
-				cookieStoreId: container.cookieStoreId,
-				url,
-				index: tab.index,
-			})
             const newTabId = newTab.id
 
             // Cleanup orphaned TC tabs that may have been created during the redirect.
@@ -520,6 +568,26 @@ export class HotswapHandlerImpl implements HotswapHandler {
 
 	private debug(...args: unknown[]): void {
 		this.deps.logger.log(...args)
+	}
+
+	private async shouldOpenBeforeClose(tab: Tab): Promise<boolean> {
+		if (tab.windowId == null) return false
+		try {
+			const windowTabs = await this.deps.browserApi.tabs.query({ windowId: tab.windowId })
+			return windowTabs.length <= 1
+		} catch (error) {
+			this.debug('activate: failed to count tabs in window', error)
+			return false
+		}
+	}
+
+	private async removeSourceTab(tab: Tab): Promise<void> {
+		if (tab.id == null) return
+		try {
+			await this.deps.browserApi.tabs.remove(tab.id)
+		} catch {
+			this.debug('activate: source tab already removed (TC may have replaced it)')
+		}
 	}
 
 	private async persistHotswapRecords(): Promise<void> {

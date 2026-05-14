@@ -1,6 +1,6 @@
 {
   "name": "containmarks",
-  "version": "1.1.0",
+  "version": "1.2.1",
   "private": true,
   "description": "ContainMarks Firefox extension build and test tooling",
   "scripts": {
