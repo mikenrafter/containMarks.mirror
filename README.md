@@ -61,7 +61,7 @@ If you experience any issues with stale tokens, the extension preferences page (
 
 ## Sync
 
-ContainMarks now works with Firefox Sync / bookmark transfer methods.
+ContainMarks works with Firefox Sync / bookmark transfer methods.
 
 ## Privacy Policy/T.O.S/C.O.C
 

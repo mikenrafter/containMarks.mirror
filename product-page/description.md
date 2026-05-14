@@ -24,12 +24,11 @@ This extension works well with both [*Temporary Containers* on the Mozilla-Addon
 
 ## Security
 
-ContainMarks attaches a one-time code (a token) to all assigned bookmarks. This ensures only bookmarked pairings open in the assigned container.  
-If you experience any issues with stale tokens, the extension preferences page ([read more below](#token-retention-options)) may be able to help.
+ContainMarks attaches a one-time code (a token) to all assigned bookmarks. This ensures only bookmarked pairings open in the assigned container.
 
 ## Sync
 
-ContainMarks now works with Firefox Sync / bookmark transfer methods.
+ContainMarks works with Firefox Sync / bookmark transfer methods.
 
 ## Privacy Policy/T.O.S/C.O.C
 
@@ -76,15 +75,6 @@ The page-action shortcut always creates a bookmark for the current tab URL.
 
 - If the tab is in a container, the bookmark is container-mapped.
 - If the tab is not in a container, a plain bookmark is created.
-
-## Runtime Architecture
-
-- `src/backgroundApp.ts`: event orchestration (startup, tab update handling, context menus, page-action flow)
-- `src/containerMappingStore.ts`: stable index mapping + bookmark-backed sync persistence
-- `src/containerMappings.ts`: URL codec for bookmark and mapping formats
-- `src/settings.ts`: settings sanitization, validation, and storage boundaries
-
-This separation keeps encoded URL rules and sync mapping persistence independent from browser event wiring.
 
 ## Made with ideas from
 
