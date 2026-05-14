@@ -4,6 +4,12 @@ Natively and easily edit and open bookmarks in multi-account containers.
 
 ---
 
+## Compatability
+
+This extension works well with both [*Temporary Containers* on the Mozilla-Addons-Store](https://addons.mozilla.org/en-US/firefox/addon/temporary-containers/) and [*Temporary Containers Plus* on the Mozilla-Addons-Store](https://addons.mozilla.org/en-US/firefox/addon/temporary-containers-plus/).
+
+---
+
 ## Usage
 
 (see the screenshots above, or head to the [repository](https://gitlab.com/mikenrafter/containMarks/-/blob/main/README.md) for gifs)
