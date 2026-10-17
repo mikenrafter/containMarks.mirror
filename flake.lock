@@ -1,5 +1,28 @@
 {
   "nodes": {
+    "firefox-addon-live": {
+      "inputs": {
+        "flake-utils": [
+          "flake-utils"
+        ],
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1792217727,
+        "narHash": "sha256-bIE0WVAG+gJL6+k6pW6znBjl53/BEltFzETq1kyHF6k=",
+        "owner": "mikenrafter",
+        "repo": "firefox-addon-live",
+        "rev": "a5175912c2ce0d5e074e0a0b63f70a0945dee4c4",
+        "type": "github"
+      },
+      "original": {
+        "owner": "mikenrafter",
+        "repo": "firefox-addon-live",
+        "type": "github"
+      }
+    },
     "flake-utils": {
       "inputs": {
         "systems": "systems"
@@ -36,6 +59,7 @@
     },
     "root": {
       "inputs": {
+        "firefox-addon-live": "firefox-addon-live",
         "flake-utils": "flake-utils",
         "nixpkgs": "nixpkgs"
       }

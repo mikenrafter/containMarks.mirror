@@ -57,7 +57,7 @@ Turn on **Ask where to save each time** in the options page, and the bookmark bu
 <details>
 <summary>Choose where quick bookmarks are saved from the options page</summary>
 
-![Set target folder](./product-page/usage-target.png)
+![Set target folder](./product-page/usage-target.gif)
 
 </details>
 
@@ -106,6 +106,24 @@ This writes `dist/*.zip` (the standard WebExtension build artifact). For a local
 ```bash
 nix develop -c npm run build:firefox:xpi
 ```
+
+## Tests
+
+```bash
+nix develop -c npm test            # unit tests (Vitest, mocked browser APIs)
+nix develop -c npm run test:live   # real Firefox, driven over Marionette
+```
+
+The live tests start a throwaway Firefox (vanilla, from nixpkgs) on a private Xvfb display, load `src/` as a temporary add-on, and click real UI with `xdotool`. Pages are local fixtures, so no network is needed. The tests are in `tests/live/`; the harness is [firefox-addon-live](https://github.com/mikenrafter/firefox-addon-live), a flake input that `nix develop` links in as an npm dependency.
+
+## README screenshots and GIFs
+
+```bash
+nix develop -c npm run capture:readme                 # every scene
+nix develop -c npm run capture:readme -- picker target # only some scenes
+```
+
+This rebuilds the add-on, replays each usage scene in a live Firefox, and writes a PNG still and a GIF per scene to `product-page/` (640 px wide; the settings scene is taller so the whole page shows). Scenes are in `scripts/capture-readme-assets.ts`.
 
 ---
 

@@ -5,3 +5,5 @@ dist/
 src/**.js
 .diffcore/*
 src/picker/*.js
+# Linked by `nix develop` (see flake.nix).
+.firefox-addon-live
