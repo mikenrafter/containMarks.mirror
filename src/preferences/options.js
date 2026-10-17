@@ -9,6 +9,7 @@
     regenerateTokenOnEveryUse: true,
     acknowledgeRiskyTokenBehavior: false,
     showPageActionButton: true,
+    askForFolderOnBookmark: false,
     enableBookmarkSync: true,
     allowEncodedBookmarkImport: false
   };
@@ -24,6 +25,7 @@
       regenerateTokenOnEveryUse: candidate.regenerateTokenOnEveryUse ?? DEFAULT_SETTINGS.regenerateTokenOnEveryUse,
       acknowledgeRiskyTokenBehavior: candidate.acknowledgeRiskyTokenBehavior ?? DEFAULT_SETTINGS.acknowledgeRiskyTokenBehavior,
       showPageActionButton: candidate.showPageActionButton ?? DEFAULT_SETTINGS.showPageActionButton,
+      askForFolderOnBookmark: candidate.askForFolderOnBookmark ?? DEFAULT_SETTINGS.askForFolderOnBookmark,
       enableBookmarkSync: candidate.enableBookmarkSync ?? DEFAULT_SETTINGS.enableBookmarkSync,
       allowEncodedBookmarkImport: candidate.allowEncodedBookmarkImport ?? DEFAULT_SETTINGS.allowEncodedBookmarkImport
     };
@@ -288,6 +290,7 @@
     const regenerateTokenOnEveryUse = getElementById("regenerate-token-on-use").checked;
     const acknowledgeRiskyTokenBehavior = getElementById("ack-risks").checked;
     const showPageActionButton = getElementById("show-page-action-button").checked;
+    const askForFolderOnBookmark = getElementById("ask-for-folder").checked;
     const enableBookmarkSync = getElementById("enable-bookmark-sync").checked;
     return {
       targetFolderId: folderSelect.value || DEFAULT_SETTINGS.targetFolderId,
@@ -295,6 +298,7 @@
       regenerateTokenOnEveryUse,
       acknowledgeRiskyTokenBehavior,
       showPageActionButton,
+      askForFolderOnBookmark,
       enableBookmarkSync,
       allowEncodedBookmarkImport: DEFAULT_SETTINGS.allowEncodedBookmarkImport
     };
@@ -305,6 +309,7 @@
     getElementById("regenerate-token-on-use").checked = settings.regenerateTokenOnEveryUse;
     getElementById("ack-risks").checked = settings.acknowledgeRiskyTokenBehavior;
     getElementById("show-page-action-button").checked = settings.showPageActionButton;
+    getElementById("ask-for-folder").checked = settings.askForFolderOnBookmark;
     getElementById("enable-bookmark-sync").checked = settings.enableBookmarkSync;
   }
   function setStatus(message, isError = false) {

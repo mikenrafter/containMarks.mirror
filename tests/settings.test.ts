@@ -25,6 +25,7 @@ describe('settings helpers', () => {
 			regenerateTokenOnEveryUse: false,
 			acknowledgeRiskyTokenBehavior: false,
 			showPageActionButton: true,
+			askForFolderOnBookmark: false,
 			enableBookmarkSync: true,
 			allowEncodedBookmarkImport: false
 		})
@@ -37,6 +38,7 @@ describe('settings helpers', () => {
 			regenerateTokenOnEveryUse: false,
 			acknowledgeRiskyTokenBehavior: false,
 			showPageActionButton: true,
+			askForFolderOnBookmark: false,
 			enableBookmarkSync: true,
 			allowEncodedBookmarkImport: false
 		})
@@ -47,6 +49,7 @@ describe('settings helpers', () => {
 			regenerateTokenOnEveryUse: true,
 			acknowledgeRiskyTokenBehavior: false,
 			showPageActionButton: true,
+			askForFolderOnBookmark: false,
 			enableBookmarkSync: true,
 			allowEncodedBookmarkImport: false
 		})
@@ -59,6 +62,7 @@ describe('settings helpers', () => {
 			regenerateTokenOnEveryUse: true,
 			acknowledgeRiskyTokenBehavior: false,
 			showPageActionButton: true,
+			askForFolderOnBookmark: false,
 			enableBookmarkSync: true,
 			allowEncodedBookmarkImport: false
 		})).toBe(false)
@@ -69,6 +73,7 @@ describe('settings helpers', () => {
 			regenerateTokenOnEveryUse: true,
 			acknowledgeRiskyTokenBehavior: true,
 			showPageActionButton: true,
+			askForFolderOnBookmark: false,
 			enableBookmarkSync: true,
 			allowEncodedBookmarkImport: false
 		})).toBe(true)

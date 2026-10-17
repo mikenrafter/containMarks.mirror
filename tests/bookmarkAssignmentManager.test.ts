@@ -64,13 +64,15 @@ function createMockBrowserApi(): BrowserApi {
 			setTitle: vi.fn().mockResolvedValue(undefined),
 			show: vi.fn().mockResolvedValue(undefined),
 			hide: vi.fn().mockResolvedValue(undefined),
+			setPopup: vi.fn().mockResolvedValue(undefined),
 			onClicked: { addListener: vi.fn() },
 		},
 		webNavigation: { onBeforeNavigate: { addListener: vi.fn() } },
 		webRequest: { onBeforeRequest: { addListener: vi.fn() } },
 		management: { get: vi.fn().mockRejectedValue(new Error('not found')) },
-		runtime: { sendMessage: vi.fn().mockResolvedValue(undefined) },
+		runtime: { sendMessage: vi.fn().mockResolvedValue(undefined), onMessage: { addListener: vi.fn() } },
 		storage: {
+			onChanged: { addListener: vi.fn() },
 			local: {
 				get: vi.fn().mockResolvedValue({}),
 				set: vi.fn().mockResolvedValue(undefined),
@@ -86,6 +88,7 @@ function createDefaultSettings(): ContainMarksSettings {
 		regenerateTokenOnEveryUse: false,
 		acknowledgeRiskyTokenBehavior: false,
 		showPageActionButton: true,
+		askForFolderOnBookmark: false,
 		enableBookmarkSync: false,
 		allowEncodedBookmarkImport: false,
 	}

@@ -32,6 +32,9 @@
 				display: block;
 				margin-bottom: 10px;
 			}
+			label.after-select {
+				margin: 12px 0 0;
+			}
 			select,
 			button {
 				font: inherit;
@@ -96,6 +99,10 @@
 					<legend>Bookmark Target</legend>
 					<label for="target-folder">Target folder for page-action bookmark creation</label>
 					<select id="target-folder" required></select>
+					<label class="after-select">
+						<input type="checkbox" id="ask-for-folder" />
+						Ask where to save each time (the target folder above is preselected)
+					</label>
 				</fieldset>
 
 				<fieldset>

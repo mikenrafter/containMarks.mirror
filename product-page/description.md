@@ -15,10 +15,17 @@ This extension works well with both [*Temporary Containers* on the Mozilla-Addon
 (see the screenshots above, or head to the [repository](https://gitlab.com/mikenrafter/containMarks/-/blob/main/README.md) for gifs)
 
 - Quickly bookmark the current page + container combo
+- Optionally pick the folder each time you bookmark
 - Assign a container from the bookmark context menu
 - Easily edit assigned bookmarks with the native bookmark UI
 - Assign whole folders in one pass
 - Choose where quick bookmarks are saved from the options page
+
+---
+
+## Pick a folder every time
+
+Prefer to file bookmarks as you go? Turn on **Ask where to save each time** in the options, and the bookmark button opens a small picker: rename the bookmark, choose any folder, and save. Your usual target folder is preselected, so a quick Enter still works. It's off by default, and Firefox's own star button keeps working exactly as before.
 
 ---
 
@@ -75,6 +82,7 @@ The page-action shortcut always creates a bookmark for the current tab URL.
 
 - If the tab is in a container, the bookmark is container-mapped.
 - If the tab is not in a container, a plain bookmark is created.
+- With `Ask where to save each time` on, the button opens a folder picker popup first.
 
 ## Made with ideas from
 

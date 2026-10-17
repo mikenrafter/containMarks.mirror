@@ -6,6 +6,10 @@
  * bookmark in the target folder and encodes the container assignment into the URL.
  * Visibility is synced on tab switch and load-complete events.
  *
+ * With `askForFolderOnBookmark` on, the button opens the folder picker popup
+ * (`picker/picker.html`) instead. Firefox then skips `onClicked`; the popup
+ * sends `BOOKMARK_TAB_MESSAGE` back here with the chosen folder and title.
+ *
  * Boundary contract:
  * - Reads settings to determine whether the button should be visible.
  * - Delegates bookmark encoding to `updateBookmarkContainerUrl` (owned by BAM).
@@ -27,6 +31,34 @@ import type {
 	Tab,
 } from '../models'
 import { NO_CONTAINER, TEMP_CONTAINER_SENTINEL } from '../constants'
+
+/** Popup page for choosing the folder each time, relative to the extension root. */
+export const FOLDER_PICKER_POPUP = 'picker/picker.html'
+
+/** Runtime message the folder picker sends to save the bookmark. */
+export const BOOKMARK_TAB_MESSAGE = 'containmarks:bookmark-tab'
+
+export interface BookmarkTabMessage {
+	type: typeof BOOKMARK_TAB_MESSAGE
+	tabId: number
+	parentId: string
+	title?: string
+}
+
+/** Title the page action gives new bookmarks (also the picker's prefilled name). */
+export function defaultBookmarkTitle(tab: Pick<Tab, 'title' | 'url'>): string {
+	return (tab.title ?? tab.url ?? '').slice(0, 10)
+}
+
+function isBookmarkTabMessage(message: unknown): message is BookmarkTabMessage {
+	if (message === null || typeof message !== 'object') return false
+	const candidate = message as Partial<BookmarkTabMessage>
+	return candidate.type === BOOKMARK_TAB_MESSAGE
+		&& typeof candidate.tabId === 'number'
+		&& typeof candidate.parentId === 'string'
+		&& candidate.parentId.length > 0
+		&& (candidate.title === undefined || typeof candidate.title === 'string')
+}
 
 // ---------------------------------------------------------------------------
 // Dependencies
@@ -75,6 +107,14 @@ export interface PageActionHandler {
 	 * Bound function property — safe to pass directly as a browser listener callback.
 	 */
 	readonly handlePageActionClicked: (tab: Tab) => Promise<void>
+
+	/**
+	 * Handles `BOOKMARK_TAB_MESSAGE` from the folder picker: bookmarks the tab in the
+	 * chosen folder. Returns undefined for any other message so other listeners can answer.
+	 *
+	 * Bound function property — safe to pass directly as a browser listener callback.
+	 */
+	readonly handleMessage: (message: unknown) => Promise<{ ok: true } | undefined>
 }
 
 // ---------------------------------------------------------------------------
@@ -99,6 +139,13 @@ export class PageActionHandlerImpl implements PageActionHandler {
 				await this.browserApi.pageAction.show(tabId)
 			} else if (!settings.showPageActionButton && isCurrentlyShown) {
 				await this.browserApi.pageAction.hide(tabId)
+			}
+
+			if (settings.showPageActionButton) {
+				await this.browserApi.pageAction.setPopup({
+					tabId,
+					popup: settings.askForFolderOnBookmark ? FOLDER_PICKER_POPUP : '',
+				})
 			}
 		} catch {
 			// Tab may have closed between the event and this handler — safe to ignore.
@@ -125,12 +172,25 @@ export class PageActionHandlerImpl implements PageActionHandler {
 			return
 		}
 
+		await this.bookmarkTab(tab, settings.targetFolderId)
+	}
+
+	readonly handleMessage = async (message: unknown): Promise<{ ok: true } | undefined> => {
+		if (!isBookmarkTabMessage(message)) return undefined
+
+		const tab = await this.browserApi.tabs.get(message.tabId)
+		await this.bookmarkTab(tab, message.parentId, message.title?.trim() || undefined)
+		return { ok: true }
+	}
+
+	/** Creates the bookmark at the top of `parentId` and encodes the tab's container into it. */
+	private async bookmarkTab(tab: Tab, parentId: string, title = defaultBookmarkTitle(tab)): Promise<void> {
 		if (!tab.url) return
 
 		const bookmark = await this.browserApi.bookmarks.create({
-			parentId: settings.targetFolderId,
+			parentId,
 			index: 0,
-			title: (tab.title ?? tab.url).slice(0, 10),
+			title,
 			url: tab.url,
 		})
 

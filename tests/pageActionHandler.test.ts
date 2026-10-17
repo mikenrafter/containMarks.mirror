@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { PageActionHandlerImpl } from '../src/background/pageActionHandler'
+import { BOOKMARK_TAB_MESSAGE, FOLDER_PICKER_POPUP, PageActionHandlerImpl } from '../src/background/pageActionHandler'
 import type { PageActionHandlerDeps } from '../src/background/pageActionHandler'
 import type { BrowserApi, Tab, ContainMarksSettings } from '../src/models'
 import { NO_CONTAINER, TEMP_CONTAINER_SENTINEL } from '../src/constants'
@@ -66,6 +66,7 @@ function createMockBrowserApi(): BrowserApi {
 			setTitle: vi.fn().mockResolvedValue(undefined),
 			show: vi.fn().mockResolvedValue(undefined),
 			hide: vi.fn().mockResolvedValue(undefined),
+			setPopup: vi.fn().mockResolvedValue(undefined),
 			onClicked: { addListener: vi.fn() },
 		},
 		webNavigation: {
@@ -78,9 +79,11 @@ function createMockBrowserApi(): BrowserApi {
 			get: vi.fn().mockRejectedValue(new Error('not found')),
 		},
 		runtime: {
+			onMessage: { addListener: vi.fn() },
 			sendMessage: vi.fn().mockResolvedValue(undefined),
 		},
 		storage: {
+			onChanged: { addListener: vi.fn() },
 			local: {
 				get: vi.fn().mockResolvedValue({}),
 				set: vi.fn().mockResolvedValue(undefined),
@@ -96,6 +99,7 @@ function createDefaultSettings(): ContainMarksSettings {
 		regenerateTokenOnEveryUse: false,
 		acknowledgeRiskyTokenBehavior: false,
 		showPageActionButton: true,
+		askForFolderOnBookmark: false,
 		enableBookmarkSync: false,
 		allowEncodedBookmarkImport: false,
 	}
@@ -163,6 +167,76 @@ describe('PageActionHandlerImpl', () => {
 
 			expect(browserApi.pageAction.show).not.toHaveBeenCalled()
 			expect(browserApi.pageAction.hide).not.toHaveBeenCalled()
+		})
+
+		it('attaches the folder picker popup when asking for a folder is enabled', async () => {
+			const settings = createDefaultSettings()
+			settings.askForFolderOnBookmark = true
+			const { deps, browserApi } = createMockDeps({ settings: vi.fn().mockResolvedValue(settings) })
+			const handler = new PageActionHandlerImpl(deps)
+
+			await handler.syncPageActionVisibilityForTab(1)
+
+			expect(browserApi.pageAction.setPopup).toHaveBeenCalledWith({ tabId: 1, popup: FOLDER_PICKER_POPUP })
+		})
+
+		it('clears the popup so clicks save straight away when asking is disabled', async () => {
+			const { deps, browserApi } = createMockDeps()
+			const handler = new PageActionHandlerImpl(deps)
+
+			await handler.syncPageActionVisibilityForTab(1)
+
+			expect(browserApi.pageAction.setPopup).toHaveBeenCalledWith({ tabId: 1, popup: '' })
+		})
+	})
+
+	describe('handleMessage', () => {
+		it('bookmarks the tab in the picked folder with the picked title, encoding its container', async () => {
+			const { deps, browserApi } = createMockDeps()
+			;(browserApi.tabs.get as ReturnType<typeof vi.fn>).mockResolvedValue(
+				makeTab({ id: 7, url: 'https://example.com/inbox', title: 'Inbox', cookieStoreId: 'firefox-container-2' }),
+			)
+			const handler = new PageActionHandlerImpl(deps)
+
+			const result = await handler.handleMessage({
+				type: BOOKMARK_TAB_MESSAGE, tabId: 7, parentId: 'unfiled_____', title: 'My inbox',
+			})
+
+			expect(browserApi.tabs.get).toHaveBeenCalledWith(7)
+			expect(browserApi.bookmarks.create).toHaveBeenCalledWith({
+				parentId: 'unfiled_____',
+				index: 0,
+				title: 'My inbox',
+				url: 'https://example.com/inbox',
+			})
+			expect(deps.updateBookmarkContainerUrl).toHaveBeenCalledWith(
+				expect.objectContaining({ id: 'created-1' }),
+				'firefox-container-2',
+			)
+			expect(result).toEqual({ ok: true })
+		})
+
+		it('falls back to the default title when the picked title is blank', async () => {
+			const { deps, browserApi } = createMockDeps()
+			;(browserApi.tabs.get as ReturnType<typeof vi.fn>).mockResolvedValue(makeTab({ id: 7, title: 'Example Page' }))
+			const handler = new PageActionHandlerImpl(deps)
+
+			await handler.handleMessage({ type: BOOKMARK_TAB_MESSAGE, tabId: 7, parentId: 'menu________', title: '   ' })
+
+			expect(browserApi.bookmarks.create).toHaveBeenCalledWith(expect.objectContaining({
+				parentId: 'menu________',
+				title: 'Example Pa',
+			}))
+		})
+
+		it('ignores unrelated or malformed messages', async () => {
+			const { deps, browserApi } = createMockDeps()
+			const handler = new PageActionHandlerImpl(deps)
+
+			expect(await handler.handleMessage({ type: 'something-else' })).toBeUndefined()
+			expect(await handler.handleMessage({ type: BOOKMARK_TAB_MESSAGE, tabId: '7', parentId: 'x' })).toBeUndefined()
+			expect(await handler.handleMessage(null)).toBeUndefined()
+			expect(browserApi.bookmarks.create).not.toHaveBeenCalled()
 		})
 	})
 

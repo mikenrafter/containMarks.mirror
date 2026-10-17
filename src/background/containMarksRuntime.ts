@@ -61,7 +61,7 @@ import {
 	readLegacyReference,
 	readLegacyStorageKeys,
 } from '../urlCodec'
-import { loadSettings, saveSettings } from '../preferences/settings'
+import { SETTINGS_STORAGE_KEY, loadSettings, saveSettings } from '../preferences/settings'
 
 import { HotswapHandlerImpl } from './hotswapHandler'
 import type { HotswapHandler } from './hotswapHandler'
@@ -71,7 +71,7 @@ import { TempContainerLayerImpl } from './tempContainerLayer'
 import type { TempContainerLayer } from './tempContainerLayer'
 import { BookmarkAssignmentManagerImpl } from './bookmarkAssignmentManager'
 import type { BookmarkAssignmentManager } from './bookmarkAssignmentManager'
-import { PageActionHandlerImpl } from './pageActionHandler'
+import { BOOKMARK_TAB_MESSAGE, PageActionHandlerImpl } from './pageActionHandler'
 import type { PageActionHandler } from './pageActionHandler'
 
 import {
@@ -650,8 +650,18 @@ export class ContainMarksRuntimeImpl implements ContainMarksRuntime {
 		this.browserApi.tabs.onCreated.addListener(this.handleTabCreated)
 		this.browserApi.windows.onCreated.addListener(this.handleWindowCreated)
 
-		// Page action → PageActionHandler
+		// Page action → PageActionHandler (direct click, or the folder picker popup's message)
 		this.browserApi.pageAction.onClicked.addListener(this._pageAction.handlePageActionClicked)
+		this.browserApi.runtime.onMessage.addListener((message) => {
+			// Returning undefined (not a promise) leaves other messages for other listeners.
+			if ((message as { type?: unknown } | null)?.type !== BOOKMARK_TAB_MESSAGE) return
+			return this._pageAction.handleMessage(message)
+		})
+		// Settings saved from the options page change button visibility and popup.
+		this.browserApi.storage.onChanged.addListener(async (changes, areaName) => {
+			if (areaName !== 'local' || !(SETTINGS_STORAGE_KEY in changes)) return
+			await this._pageAction.syncPageActionVisibilityForAllTabs()
+		})
 
 		// Bookmark events → HotswapHandler (decode/revert, anti-injection stripping)
 		this.browserApi.bookmarks.onChanged.addListener(this._hotswapHandler.handleBookmarkChanged)

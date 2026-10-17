@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<title>Bookmark in container</title>
+		<style>
+			:root {
+				color-scheme: light dark;
+				--bg: #ffffff;
+				--fg: #15141a;
+				--muted: #5b5b66;
+				--field: #f0f0f4;
+				--border: #cfcfd8;
+				--accent: #0061e0;
+				--accent-fg: #ffffff;
+				--pill: #8f8f9d;
+				font: 13px system-ui, sans-serif;
+			}
+			@media (prefers-color-scheme: dark) {
+				:root {
+					--bg: #42414d;
+					--fg: #fbfbfe;
+					--muted: #cfcfd8;
+					--field: #2b2a33;
+					--border: #5b5b66;
+					--accent: #00ddff;
+					--accent-fg: #15141a;
+				}
+			}
+			body {
+				margin: 0;
+				width: 300px;
+				background: var(--bg);
+				color: var(--fg);
+			}
+			form {
+				display: flex;
+				flex-direction: column;
+				gap: 6px;
+				padding: 14px 16px 16px;
+			}
+			h1 {
+				margin: 0 0 6px;
+				font-size: 14px;
+				font-weight: 600;
+				text-align: center;
+			}
+			#container {
+				display: inline-block;
+				padding: 0 6px;
+				border-radius: 4px;
+				border: 1px solid var(--pill);
+				color: var(--pill);
+			}
+			label {
+				margin-top: 6px;
+			}
+			input,
+			select {
+				font: inherit;
+				color: inherit;
+				background: var(--field);
+				border: 1px solid var(--border);
+				border-radius: 4px;
+			}
+			input {
+				padding: 6px 8px;
+			}
+			select {
+				padding: 2px 0;
+			}
+			option {
+				padding: 3px 8px;
+			}
+			footer {
+				display: flex;
+				justify-content: flex-end;
+				gap: 8px;
+				margin-top: 10px;
+			}
+			button {
+				font: inherit;
+				padding: 6px 14px;
+				border-radius: 4px;
+				border: 0;
+				background: var(--field);
+				color: inherit;
+			}
+			button[type="submit"] {
+				background: var(--accent);
+				color: var(--accent-fg);
+				font-weight: 600;
+			}
+			#error {
+				color: #e22850;
+				margin: 0;
+			}
+			#error:empty {
+				display: none;
+			}
+		</style>
+	</head>
+	<body>
+		<form id="picker">
+			<h1>Bookmark in <span id="container">No Container</span></h1>
+			<label for="name">Name</label>
+			<input id="name" autocomplete="off" />
+			<label for="folders">Folder</label>
+			<select id="folders" size="10" required></select>
+			<p id="error" role="alert"></p>
+			<footer>
+				<button type="button" id="cancel">Cancel</button>
+				<button type="submit" id="save">Save</button>
+			</footer>
+		</form>
+		<script src="picker.js"></script>
+	</body>
+</html>

@@ -32,6 +32,8 @@ export interface ContainMarksSettings {
 	regenerateTokenOnEveryUse: boolean
 	acknowledgeRiskyTokenBehavior: boolean
 	showPageActionButton: boolean
+	/** When true, the page action opens a folder picker popup instead of saving straight to `targetFolderId`. */
+	askForFolderOnBookmark: boolean
 	enableBookmarkSync: boolean
 	/** When true, newly-created bookmarks with `#cm:` encoding are not auto-stripped.
 	 *  Useful during bookmark import/transfer. Reverts to `false` on every extension startup. */
@@ -174,7 +176,7 @@ export interface TabsApi {
 	remove(tabId: number): Promise<void>
 	get(tabId: number): Promise<Tab>
 	update(tabId: number, updateProperties: { url?: string, loadReplace?: boolean }): Promise<Tab>
-	query(queryInfo: { windowId?: number }): Promise<Tab[]>
+	query(queryInfo: { windowId?: number; active?: boolean; currentWindow?: boolean }): Promise<Tab[]>
 	highlight(details: { populate: boolean; tabs: number[] }): Promise<void>
 	onActivated: {
 		addListener(listener: (activeInfo: TabActivatedInfo) => void | Promise<void>): void
@@ -202,6 +204,8 @@ export interface PageActionApi {
 	setTitle(details: { tabId: number; title: string }): Promise<void>
 	show(tabId: number): Promise<void>
 	hide(tabId: number): Promise<void>
+	/** An empty string clears the popup, so clicks reach `onClicked` again. */
+	setPopup(details: { tabId: number; popup: string }): Promise<void>
 	onClicked: {
 		addListener(listener: (tab: Tab) => void | Promise<void>): void
 	}
@@ -261,6 +265,12 @@ export interface ManagementApi {
  */
 export interface RuntimeApi {
 	sendMessage(extensionId: string, message: Record<string, unknown>): Promise<unknown>
+	/** Message to ContainMarks' own background page. */
+	sendMessage(message: Record<string, unknown>): Promise<unknown>
+	/** Messages from ContainMarks' own pages (e.g. the folder picker popup). */
+	onMessage: {
+		addListener(listener: (message: unknown, sender: { id?: string }) => Promise<unknown> | void): void
+	}
 }
 
 export interface BrowserApi {
@@ -279,6 +289,9 @@ export interface BrowserApi {
 		local: {
 			get(keys?: string | string[] | Record<string, unknown> | null): Promise<Record<string, unknown>>
 			set(items: Record<string, unknown>): Promise<void>
+		}
+		onChanged: {
+			addListener(listener: (changes: Record<string, unknown>, areaName: string) => void | Promise<void>): void
 		}
 	}
 }

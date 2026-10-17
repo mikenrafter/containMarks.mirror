@@ -57,6 +57,7 @@ function defaultSettings(overrides: Partial<ContainMarksSettings> = {}): Contain
 		regenerateTokenOnEveryUse: true,
 		acknowledgeRiskyTokenBehavior: false,
 		showPageActionButton: true,
+		askForFolderOnBookmark: false,
 		enableBookmarkSync: false,
 		allowEncodedBookmarkImport: false,
 		...overrides,
@@ -247,6 +248,7 @@ function createRuntimeHarness(initialBookmarkUrl: string, options: RuntimeHarnes
 			setTitle: vi.fn().mockResolvedValue(undefined),
 			show: vi.fn().mockResolvedValue(undefined),
 			hide: vi.fn().mockResolvedValue(undefined),
+			setPopup: vi.fn().mockResolvedValue(undefined),
 			onClicked: { addListener: vi.fn() },
 		},
 		webNavigation: {
@@ -267,9 +269,11 @@ function createRuntimeHarness(initialBookmarkUrl: string, options: RuntimeHarnes
 			get: vi.fn().mockRejectedValue(new Error('Not installed')),
 		},
 		runtime: {
+			onMessage: { addListener: vi.fn() },
 			sendMessage: vi.fn().mockResolvedValue(false),
 		},
 		storage: {
+			onChanged: { addListener: vi.fn() },
 			local: {
 				get: vi.fn().mockImplementation(async (keys?: string | string[] | Record<string, unknown> | null) => {
 					if (keys == null) return { ...storageState }
@@ -462,5 +466,38 @@ describe('ContainMarksRuntime tab reopen ordering', () => {
 		const createOrder = createMock.mock.invocationCallOrder[0]
 		const removeOrder = removeMock.mock.invocationCallOrder[0]
 		expect(removeOrder).toBeLessThan(createOrder ?? 0)
+	})
+})
+
+describe('ContainMarksRuntime folder picker wiring', () => {
+	it('forwards picker messages to the page action handler', async () => {
+		const harness = createRuntimeHarness('https://example.com')
+		const onMessage = harness.browserApi.runtime.onMessage.addListener as ReturnType<typeof vi.fn>
+		const listener = onMessage.mock.calls[0]?.[0] as (message: unknown, sender: { id?: string }) => Promise<unknown> | void
+
+		expect(listener({ type: 'unrelated' }, {})).toBeUndefined()
+		await expect(listener(
+			{ type: 'containmarks:bookmark-tab', tabId: 1, parentId: 'unfiled_____', title: 'Picked' },
+			{},
+		)).resolves.toEqual({ ok: true })
+		expect(harness.browserApi.bookmarks.create).toHaveBeenCalledWith(expect.objectContaining({
+			parentId: 'unfiled_____',
+			title: 'Picked',
+		}))
+	})
+
+	it('re-syncs page action popups when settings change', async () => {
+		const harness = createRuntimeHarness('https://example.com')
+		const onChanged = harness.browserApi.storage.onChanged.addListener as ReturnType<typeof vi.fn>
+		const listener = onChanged.mock.calls[0]?.[0] as (changes: Record<string, unknown>, area: string) => Promise<void>
+		const setPopup = harness.browserApi.pageAction.setPopup as ReturnType<typeof vi.fn>
+		await flushMicrotasks(20)
+		setPopup.mockClear()
+
+		await listener({ unrelated: {} }, 'local')
+		expect(setPopup).not.toHaveBeenCalled()
+
+		await listener({ 'containMarks.settings': { newValue: {} } }, 'local')
+		expect(setPopup).toHaveBeenCalled()
 	})
 })

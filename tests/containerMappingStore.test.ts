@@ -122,6 +122,7 @@ function createMappingStoreBrowserMock(options?: {
 			setTitle: vi.fn().mockResolvedValue(undefined),
 			show: vi.fn().mockResolvedValue(undefined),
 			hide: vi.fn().mockResolvedValue(undefined),
+			setPopup: vi.fn().mockResolvedValue(undefined),
 			onClicked: { addListener: vi.fn() }
 		},
 		webNavigation: {
@@ -138,9 +139,11 @@ function createMappingStoreBrowserMock(options?: {
 			get: vi.fn().mockRejectedValue(new Error('Extension not found'))
 		},
 		runtime: {
+			onMessage: { addListener: vi.fn() },
 			sendMessage: vi.fn().mockResolvedValue(undefined)
 		},
 		storage: {
+			onChanged: { addListener: vi.fn() },
 			local: {
 				get: vi.fn().mockResolvedValue({}),
 				set: vi.fn().mockResolvedValue(undefined)

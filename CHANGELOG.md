@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- Added an optional folder picker for the bookmark button (`Ask where to save each time`), so you can choose the folder and name for each bookmark (#5).
 - Added options page with a bookmark-folder picker for page-action bookmark target selection.
 - Added token retention toggles (`Reset tokens on startup`, `Regenerate token on every use`) with risk acknowledgement gating.
 - Added sync-aware container mapping folder support in Bookmarks Menu via `ContainMarks Sync`.

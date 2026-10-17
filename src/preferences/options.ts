@@ -77,6 +77,7 @@ function readFormValues(): ContainMarksSettings {
 	const regenerateTokenOnEveryUse = getElementById<HTMLInputElement>('regenerate-token-on-use').checked
 	const acknowledgeRiskyTokenBehavior = getElementById<HTMLInputElement>('ack-risks').checked
 	const showPageActionButton = getElementById<HTMLInputElement>('show-page-action-button').checked
+	const askForFolderOnBookmark = getElementById<HTMLInputElement>('ask-for-folder').checked
 	const enableBookmarkSync = getElementById<HTMLInputElement>('enable-bookmark-sync').checked
 
 	return {
@@ -85,6 +86,7 @@ function readFormValues(): ContainMarksSettings {
 		regenerateTokenOnEveryUse,
 		acknowledgeRiskyTokenBehavior,
 		showPageActionButton,
+		askForFolderOnBookmark,
 		enableBookmarkSync,
 		allowEncodedBookmarkImport: DEFAULT_SETTINGS.allowEncodedBookmarkImport
 	}
@@ -96,6 +98,7 @@ function writeFormValues(settings: ContainMarksSettings): void {
 	getElementById<HTMLInputElement>('regenerate-token-on-use').checked = settings.regenerateTokenOnEveryUse
 	getElementById<HTMLInputElement>('ack-risks').checked = settings.acknowledgeRiskyTokenBehavior
 	getElementById<HTMLInputElement>('show-page-action-button').checked = settings.showPageActionButton
+	getElementById<HTMLInputElement>('ask-for-folder').checked = settings.askForFolderOnBookmark
 	getElementById<HTMLInputElement>('enable-bookmark-sync').checked = settings.enableBookmarkSync
 }
 

@@ -120,6 +120,7 @@ function createOptionsBrowserMock(options?: {
 			onCreated: { addListener: vi.fn() },
 		},
 		storage: {
+			onChanged: { addListener: vi.fn() },
 			local: {
 				get: vi.fn().mockImplementation(extensionStorage.get.bind(extensionStorage)),
 				set: vi.fn().mockImplementation(extensionStorage.set.bind(extensionStorage)),

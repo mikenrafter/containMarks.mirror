@@ -25,6 +25,15 @@ This extension works well with both [*Temporary Containers* on the Mozilla-Addon
 </details>
 
 <details>
+<summary>Pick the folder each time you bookmark (optional)</summary>
+
+Turn on **Ask where to save each time** in the options page, and the bookmark button opens a small folder picker. Edit the name, pick any folder (your target folder is preselected), and press Save or Enter. The bookmark still opens in the container you saved it from.
+
+![Folder picker usage example](./product-page/usage-picker.gif)
+
+</details>
+
+<details>
 <summary>Assign a container from the bookmark context menu</summary>
 
 ![Context menu usage example](./product-page/usage-context.gif)
@@ -137,6 +146,7 @@ The page-action shortcut always creates a bookmark for the current tab URL.
 
 - If the tab is in a container, the bookmark is container-mapped.
 - If the tab is not in a container, a plain bookmark is created.
+- With `Ask where to save each time` on, the button opens a folder picker popup first. The picker preselects the target folder; Firefox's own star button and Ctrl+D are left alone.
 
 ## Runtime Architecture
 

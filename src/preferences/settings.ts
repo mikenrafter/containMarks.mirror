@@ -9,6 +9,7 @@ export const DEFAULT_SETTINGS: ContainMarksSettings = {
 	regenerateTokenOnEveryUse: true,
 	acknowledgeRiskyTokenBehavior: false,
 	showPageActionButton: true,
+	askForFolderOnBookmark: false,
 	enableBookmarkSync: true,
 	allowEncodedBookmarkImport: false
 }
@@ -30,6 +31,7 @@ export function sanitizeSettings(value: unknown): ContainMarksSettings {
 		regenerateTokenOnEveryUse: candidate.regenerateTokenOnEveryUse ?? DEFAULT_SETTINGS.regenerateTokenOnEveryUse,
 		acknowledgeRiskyTokenBehavior: candidate.acknowledgeRiskyTokenBehavior ?? DEFAULT_SETTINGS.acknowledgeRiskyTokenBehavior,
 		showPageActionButton: candidate.showPageActionButton ?? DEFAULT_SETTINGS.showPageActionButton,
+		askForFolderOnBookmark: candidate.askForFolderOnBookmark ?? DEFAULT_SETTINGS.askForFolderOnBookmark,
 		enableBookmarkSync: candidate.enableBookmarkSync ?? DEFAULT_SETTINGS.enableBookmarkSync,
 		allowEncodedBookmarkImport: candidate.allowEncodedBookmarkImport ?? DEFAULT_SETTINGS.allowEncodedBookmarkImport
 	}
