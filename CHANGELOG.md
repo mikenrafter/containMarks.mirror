@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.2
 
 ### Added
 - Added an optional folder picker for the bookmark button (`Ask where to save each time`), so you can choose the folder and name for each bookmark (#5).
