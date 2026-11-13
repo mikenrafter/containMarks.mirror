@@ -4,7 +4,7 @@ Natively and easily edit and open bookmarks in multi-account containers.
 
 ---
 
-## Compatability
+## Compatibility
 
 This extension works well with both [*Temporary Containers* on the Mozilla-Addons-Store](https://addons.mozilla.org/en-US/firefox/addon/temporary-containers/) and [*Temporary Containers Plus* on the Mozilla-Addons-Store](https://addons.mozilla.org/en-US/firefox/addon/temporary-containers-plus/).
 
@@ -73,8 +73,8 @@ This keeps container references stable across renames and helps sync behavior ac
 
 Token retention behavior is configurable in the options page:
 
-- `Regenerate tokens on startup` toggle
-- `Regenerate tokens on every use` toggle
+- `Reset tokens on startup` toggle
+- `Regenerate token on every use` toggle
 
 ## Page-Action Bookmarking
 
