@@ -685,6 +685,60 @@ describe('ContainMarksRuntime approved TC cooperation', () => {
 		expect(h.browserApi.tabs.create).not.toHaveBeenCalled()
 	})
 
+	// WHY: CLAIM(cooperation-startup-race); S2a TC may answer after CM's startup window, and its callback must never see a void answer.
+	// catches: `if (!cooperationKnown) return`, which makes TC cancel every http navigation until a TC setting is saved.
+	it('answers pass while approval is unknown and lets the callback itself correct the cached state', async () => {
+		vi.useFakeTimers()
+		const h = await cooperativeHarness('firefox-container-2', false)
+		await vi.advanceTimersByTimeAsync(5000)
+		h.installTc(approved)
+		await h.beforeNavigateListeners[0]!({ tabId: 1, frameId: 0, url: h.encoded })
+		expect(await callbackFor(h)(resolution(), { id: negotiatedTc })).toEqual({ version: 1, action: 'pass' })
+		await vi.advanceTimersByTimeAsync(1000)
+		expect(vi.mocked(h.browserApi.runtime.sendMessage).mock.calls.some(call => (call as unknown as [unknown, { method?: string }?])[1]?.method === 'getCooperationCapabilities')).toBe(true)
+		await h.beforeNavigateListeners[0]!({ tabId: 1, frameId: 0, url: h.encoded })
+		expect(await callbackFor(h)(resolution('https://example.com/article', 'second'), { id: negotiatedTc })).toEqual({
+			version: 1, action: 'route', url: 'https://example.com/article#section', cookieStoreId: 'firefox-container-2',
+		})
+	})
+
+	// WHY: CLAIM(cooperation-single-owner); S2b a navigation that legacy CM already claimed must not also be routed by TC.
+	// catches: building a route from request.url when the cached intent says owned:false (two tabs).
+	it('passes for a navigation already claimed by legacy routing even if the capability lookup would now say approved', async () => {
+		vi.useFakeTimers()
+		const h = await cooperativeHarness()
+		h.installTc({ version: 1, approved: false })
+		await callbackFor(h)({ method: 'cooperationStateChanged', version: 1, approved: false }, { id: negotiatedTc })
+		await h.beforeNavigateListeners[0]!({ tabId: 1, frameId: 0, url: h.encoded })
+		h.installTc(approved)
+		expect(await callbackFor(h)(resolution(), { id: negotiatedTc })).toEqual({ version: 1, action: 'pass' })
+		await vi.advanceTimersByTimeAsync(1000)
+		expect(vi.mocked(h.browserApi.tabs.create).mock.calls.filter(([d]) => !d.url?.includes('offer/offer.html'))).toHaveLength(1)
+	})
+
+	// WHY: CLAIM(cooperation-scope); S3 a lost approval check cancels only ContainMarks' own navigation, never the owner's other pages.
+	// catches: failing every owned http navigation closed, or replaying legacy after the cancel.
+	it('lets ordinary navigations through when the approval check fails, but still cancels a ContainMarks request without legacy replay', async () => {
+		vi.useFakeTimers()
+		const h = await cooperativeHarness()
+		const popup = vi.mocked(h.browserApi.pageAction.show)
+		popup.mockClear()
+		h.installTc(false)
+		await h.beforeNavigateListeners[0]!({ tabId: 1, frameId: 0, url: 'https://example.com/ordinary' })
+		expect(await h.beforeRequestListeners[0]!({ tabId: 1, requestId: 'ordinary', url: 'https://example.com/ordinary', type: 'main_frame' })).toBeUndefined()
+		await vi.advanceTimersByTimeAsync(1000)
+		expect(popup).not.toHaveBeenCalled()
+		h.installTc(approved)
+		await callbackFor(h)({ method: 'cooperationStateChanged', version: 1, approved: true }, { id: negotiatedTc })
+		h.installTc(false)
+		await h.beforeNavigateListeners[0]!({ tabId: 1, frameId: 0, url: h.encoded })
+		expect(await h.beforeRequestListeners[0]!({ tabId: 1, requestId: 'bookmark', url: 'https://example.com/article', type: 'main_frame' })).toEqual({ cancel: true })
+		await vi.advanceTimersByTimeAsync(1000)
+		expect(popup).toHaveBeenCalled()
+		expect(vi.mocked(h.browserApi.tabs.create).mock.calls.filter(([d]) => !d.url?.includes('offer/offer.html'))).toHaveLength(0)
+		expect(h.browserApi.tabs.remove).not.toHaveBeenCalled()
+	})
+
 })
 
 const offerKey = 'containMarks.cooperationOffers'

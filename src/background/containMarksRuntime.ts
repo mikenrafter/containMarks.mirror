@@ -57,6 +57,7 @@ import {
 	getNewUrl,
 	isFragmentEncodedUrl,
 	isLegacyEncodedUrl,
+	parseBookmarkUrl,
 	parseLegacyBookmarkUrl,
 	readLegacyReference,
 	readLegacyStorageKeys,
@@ -343,6 +344,7 @@ export class ContainMarksRuntimeImpl implements ContainMarksRuntime {
 			if (message.approved === false) this.cooperationApproved = false
 			return this.refreshCooperation().then(async approved => { await this.rememberApproval(); return approved })
 		}
+		if (message.method === 'resolveCooperativeNavigation') return this.resolveCooperativeNavigation(message)
 		if (!this.cooperationKnown) return
 		if (message.method === 'cooperativeNavigationCompleted') {
 			const proposal = this.proposals.get(message.requestId)
@@ -352,7 +354,15 @@ export class ContainMarksRuntimeImpl implements ContainMarksRuntime {
 				? this._hotswapHandler.complete(proposal.url, proposal.bookmarkId)
 				: this._standardHandler.complete(proposal.url)
 		}
-		if (message.method !== 'resolveCooperativeNavigation') return
+		return
+	}
+
+	/**
+	 * TC's per-navigation callback. Always answers: an unknown or unapproved cache, or a navigation legacy
+	 * routing already claimed, gets an explicit pass so TC applies its own policy instead of canceling.
+	 * A pass for an unapproved cache also re-reads TC's list, so TC's own call corrects stale state.
+	 */
+	private resolveCooperativeNavigation(message: { request?: any }): Promise<unknown> {
 		const request = message.request
 		const pass = { version: 1, action: 'pass' }
 		if (!request || !Number.isInteger(request.tabId) || request.tabId < 0 || typeof request.requestId !== 'string' ||
@@ -361,10 +371,15 @@ export class ContainMarksRuntimeImpl implements ContainMarksRuntime {
 		if (existing) return Promise.resolve(existing.tabId === request.tabId ? existing.route : pass)
 		const pending = this.resolving.get(request.requestId)
 		if (pending) return pending
+		if (!this.cooperationApproved) {
+			void this.refreshCooperation().catch(error => this.debug(error))
+			return Promise.resolve(pass)
+		}
 		const operation = (async () => {
 			const cached = this.navigationIntents.get(request.tabId)
+			if (cached && !cached.owned) return pass
 			if (cached && cached.url.split('#')[0] !== request.url.split('#')[0]) return pass
-			const url = cached && cached.url.split('#')[0] === request.url.split('#')[0] ? cached.url : request.url
+			const url = this.navigationUrl(request.tabId, request.url)
 			const bookmarkId = this._hotswapHandler.hotswapRedirectMap.get(url)?.bookmarkId
 			const route = await this._hotswapHandler.resolve(url) ?? await this._standardHandler.resolve(url)
 			if (!route) return pass
@@ -375,6 +390,17 @@ export class ContainMarksRuntimeImpl implements ContainMarksRuntime {
 		})().finally(() => this.resolving.delete(request.requestId))
 		this.resolving.set(request.requestId, operation)
 		return operation
+	}
+
+	/** webRequest strips fragments, so the full URL comes from the tab's recorded navigation when it is the same page. */
+	private navigationUrl(tabId: number, requestUrl: string): string {
+		const intent = this.navigationIntents.get(tabId)
+		return intent && intent.url.split('#')[0] === requestUrl.split('#')[0] ? intent.url : requestUrl
+	}
+
+	/** Pure URL check (no tab effects): is this URL one ContainMarks itself routes? */
+	private isContainMarksUrl(url: string): boolean {
+		return parseBookmarkUrl(url)?.containerIndex != null || this._hotswapHandler.hotswapRedirectMap.has(url)
 	}
 
 	// --- Module accessors ---
@@ -483,7 +509,8 @@ export class ContainMarksRuntimeImpl implements ContainMarksRuntime {
 			this.navigationIntents.set(details.tabId, intent)
 			if (this.cooperationApproved) {
 				void this.refreshCooperation().then(approved => {
-					if (!approved && this.navigationIntents.get(details.tabId) === intent) {
+					// A lost approval only matters to navigations ContainMarks itself would have routed.
+					if (!approved && this.navigationIntents.get(details.tabId) === intent && this.isContainMarksUrl(details.url)) {
 						intent.blocked = true
 						this.cooperationFailure(details.tabId)
 					}
@@ -524,6 +551,9 @@ export class ContainMarksRuntimeImpl implements ContainMarksRuntime {
 		if (details.type !== 'main_frame') return
 		if (/^https?:/.test(details.url) && (this.cooperationApproved || this.navigationIntents.get(details.tabId)?.owned)) {
 			const intent = this.navigationIntents.get(details.tabId)
+			// webRequest drops the fragment, so judge the full URL recorded for this navigation. Ordinary
+			// pages need nothing from CM and must not wait on, or fail with, the approval check.
+			if (!this.isContainMarksUrl(this.navigationUrl(details.tabId, details.url))) return
 			return this.refreshCooperation().then(approved => {
 				if (!approved || intent?.blocked) {
 					if (intent) intent.blocked = true
