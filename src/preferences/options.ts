@@ -1,3 +1,4 @@
+import { requestCooperationApproval } from './cooperation'
 import { DEFAULT_SETTINGS, hasRiskyTokenBehavior, loadSettings, saveSettings } from './settings'
 import {
 	SYNC_FOLDER_PARENT_ID,
@@ -246,6 +247,17 @@ async function showMigrationDialog(browserApi: BrowserApi, switchingToSync: bool
 }
 
 async function initializeOptionsPage(browserApi: BrowserApi): Promise<void> {
+	const connect = getElementById<HTMLButtonElement>('connect-temporary-containers')
+	const connectionStatus = getElementById<HTMLElement>('cooperation-status')
+	connect.addEventListener('click', async () => {
+		connect.disabled = true
+		try {
+			const approved = await requestCooperationApproval(browserApi)
+			connectionStatus.textContent = approved ? 'Connected to Temporary Containers.' : 'Review the request in Temporary Containers, then approve ContainMarks.'
+		} catch (error) {
+			connectionStatus.textContent = error instanceof Error ? error.message : String(error)
+		} finally { connect.disabled = false }
+	})
 	const riskLink = getElementById<HTMLAnchorElement>('risk-link')
 	riskLink.href = RISK_LINK
 
