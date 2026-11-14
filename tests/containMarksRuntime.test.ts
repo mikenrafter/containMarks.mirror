@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { afterEach, describe, it, expect, vi } from 'vitest'
 import { ContainMarksRuntimeImpl } from '../src/background/containMarksRuntime'
 import type {
 	BookmarkNode,
@@ -35,9 +35,11 @@ interface RuntimeHarness {
 	menuHiddenListeners: MenuHiddenListener[]
 	beforeNavigateListeners: BeforeNavigateListener[]
 	beforeRequestListeners: BeforeRequestListener[]
+	externalListeners: Array<(message: unknown, sender: { id?: string }) => unknown>
 }
 
 interface RuntimeHarnessOptions {
+	tcCapabilities?: unknown
 	localMappings?: Array<{ firstSeenIndex: number; cookieStoreId: string; backupName: string }>
 	tabsInWindow?: Tab[]
 }
@@ -74,6 +76,7 @@ function createRuntimeHarness(initialBookmarkUrl: string, options: RuntimeHarnes
 		parentId: 'toolbar_____',
 	}
 
+	const externalListeners: RuntimeHarness['externalListeners'] = []
 	const menuShownListeners: MenuShownListener[] = []
 	const menuClickListeners: MenuClickListener[] = []
 	const menuHiddenListeners: MenuHiddenListener[] = []
@@ -107,6 +110,7 @@ function createRuntimeHarness(initialBookmarkUrl: string, options: RuntimeHarnes
 				if (typeof query === 'string') {
 					return bookmark.url === query ? [{ ...bookmark }] : []
 				}
+				if (options.tcCapabilities !== undefined && query.url === bookmark.url) return [{ ...bookmark }]
 				if (query.title || query.query || query.url) return []
 				return []
 			}),
@@ -195,7 +199,7 @@ function createRuntimeHarness(initialBookmarkUrl: string, options: RuntimeHarnes
 		},
 		contextualIdentities: {
 			query: vi.fn().mockImplementation(async ({ name }: { name?: string }) => {
-				if (!name) return identities
+				if (!name) return [...identities]
 				return identities.filter(identity => identity.name === name)
 			}),
 			get: vi.fn().mockImplementation(async (cookieStoreId: string) => {
@@ -266,7 +270,7 @@ function createRuntimeHarness(initialBookmarkUrl: string, options: RuntimeHarnes
 			},
 		},
 		management: {
-			get: vi.fn().mockRejectedValue(new Error('Not installed')),
+			get: options.tcCapabilities === undefined ? vi.fn().mockRejectedValue(new Error('Not installed')) : vi.fn().mockResolvedValue({ enabled: true, name: 'TC+' }),
 		},
 		runtime: {
 			onMessage: { addListener: vi.fn() },
@@ -296,6 +300,16 @@ function createRuntimeHarness(initialBookmarkUrl: string, options: RuntimeHarnes
 		},
 	}
 
+	Object.assign(browserApi.runtime, { onMessageExternal: { addListener: vi.fn((listener: RuntimeHarness['externalListeners'][number]) => externalListeners.push(listener)) } })
+	if (options.tcCapabilities !== undefined) {
+		vi.mocked(browserApi.runtime.sendMessage).mockImplementation(async (_id: string | Record<string, unknown>, message?: Record<string, unknown>) => {
+			if (message?.method === 'getCooperationCapabilities') return options.tcCapabilities
+			if (message?.method === 'isTempContainer') return message.cookieStoreId === 'firefox-container-99'
+			if (message?.method === 'createTabInTempContainer') return { id: 900, cookieStoreId: 'firefox-container-99' }
+			return false
+		})
+	}
+
 	const runtime = new ContainMarksRuntimeImpl({
 		browserApi,
 		storage: {
@@ -319,6 +333,7 @@ function createRuntimeHarness(initialBookmarkUrl: string, options: RuntimeHarnes
 		menuHiddenListeners,
 		beforeNavigateListeners,
 		beforeRequestListeners,
+		externalListeners,
 	}
 }
 
@@ -499,5 +514,147 @@ describe('ContainMarksRuntime folder picker wiring', () => {
 
 		await listener({ 'containMarks.settings': { newValue: {} } }, 'local')
 		expect(setPopup).toHaveBeenCalled()
+	})
+})
+
+
+const negotiatedTc = '{c607c8df-14a7-4f28-894f-29e8722976af}'
+const approved = { version: 1, approved: true }
+
+async function cooperativeHarness(cookieStoreId = 'firefox-container-2', tcCapabilities: unknown = approved) {
+	const encoded = 'https://example.com/article#cm:bookmarktoken:0#section'
+	const harness = createRuntimeHarness(encoded, {
+		tcCapabilities,
+		localMappings: [{ firstSeenIndex: 0, cookieStoreId, backupName: 'Work' }],
+		tabsInWindow: [{ id: 1, index: 0, windowId: 1, url: encoded }],
+	})
+	await flushMicrotasks(80)
+	vi.mocked(harness.browserApi.tabs.query).mockClear()
+	return { ...harness, encoded }
+}
+
+function callbackFor(harness: RuntimeHarness) {
+	expect(harness.externalListeners).toHaveLength(1)
+	return harness.externalListeners[0]!
+}
+
+const resolution = (url = 'https://example.com/article', requestId = 'cooperative-request') => ({
+	method: 'resolveCooperativeNavigation', version: 1, request: { requestId, tabId: 1, url },
+})
+const completion = { method: 'cooperativeNavigationCompleted', version: 1,
+	requestId: 'cooperative-request', tabId: 1, destinationTabId: 900 }
+
+describe('ContainMarksRuntime approved TC cooperation', () => {
+	afterEach(() => vi.useRealTimers())
+
+	// WHY: CLAIM(cooperation-single-owner); all CM HTTP event entry points must defer after positive negotiation.
+	// catches: adding a pure callback while leaving existing fire-and-forget activation and orphan scans alive.
+	it('records stripped-fragment intent without independently activating or scanning', async () => {
+		vi.useFakeTimers()
+		const h = await cooperativeHarness()
+		await h.beforeNavigateListeners[0]!({ tabId: 1, frameId: 0, url: h.encoded })
+		h.beforeRequestListeners[0]!({ tabId: 1, requestId: 'cooperative-request', url: 'https://example.com/article', type: 'main_frame' })
+		await flushMicrotasks(30)
+		await vi.advanceTimersByTimeAsync(1000)
+		expect(h.browserApi.tabs.create).not.toHaveBeenCalled()
+		expect(h.browserApi.tabs.remove).not.toHaveBeenCalled()
+		expect(h.browserApi.tabs.query).not.toHaveBeenCalled()
+		expect(await callbackFor(h)(resolution(), { id: negotiatedTc })).toEqual({
+			version: 1, action: 'route', url: 'https://example.com/article#section', cookieStoreId: 'firefox-container-2',
+		})
+		expect(h.browserApi.tabs.create).not.toHaveBeenCalled()
+	})
+
+	// WHY: CLAIM(cooperation-authorization); a body claiming the negotiated TC ID grants no authority.
+	// catches: accepting external messages based on a method name, installation, or forged senderId.
+	it('refuses forged callers, malformed requests and a stale same-tab URL cache', async () => {
+		const h = await cooperativeHarness()
+		const listener = callbackFor(h)
+		await h.beforeNavigateListeners[0]!({ tabId: 1, frameId: 0, url: h.encoded })
+		expect(await listener({ ...resolution(), senderId: negotiatedTc }, { id: 'attacker@test' })).toBeUndefined()
+		expect(await listener({ ...resolution(), request: { tabId: -1, requestId: '', url: 'javascript:alert(1)' } }, { id: negotiatedTc }))
+			.toEqual({ version: 1, action: 'pass' })
+		await h.beforeNavigateListeners[0]!({ tabId: 1, frameId: 0, url: 'https://different.example/' })
+		expect(await listener(resolution('https://different.example/'), { id: negotiatedTc })).toEqual({ version: 1, action: 'pass' })
+		expect(h.browserApi.tabs.create).not.toHaveBeenCalled()
+	})
+
+	// WHY: CLAIM(cooperation-single-owner); token regeneration follows accepted routing, once, preserving original fragments.
+	// catches: regenerating during classification or every duplicate completion, or forgetting completion maintenance entirely.
+	it('proposes idempotently and regenerates bookmark token only on authenticated completion', async () => {
+		const h = await cooperativeHarness()
+		const listener = callbackFor(h)
+		await h.beforeNavigateListeners[0]!({ tabId: 1, frameId: 0, url: h.encoded })
+		expect(await listener(resolution(), { id: negotiatedTc })).toEqual({
+			version: 1, action: 'route', url: 'https://example.com/article#section', cookieStoreId: 'firefox-container-2',
+		})
+		await listener(resolution(), { id: negotiatedTc })
+		expect(h.bookmark.url).toBe(h.encoded)
+		await listener(completion, { id: 'attacker@test' })
+		expect(h.bookmark.url).toBe(h.encoded)
+		await listener(completion, { id: negotiatedTc })
+		const once = h.bookmark.url
+		expect(once).not.toBe(h.encoded)
+		expect(parseBookmarkUrl(once!)).toEqual(expect.objectContaining({ url: 'https://example.com/article#section', containerIndex: 0 }))
+		const updateCount = vi.mocked(h.browserApi.bookmarks.update).mock.calls.length
+		await listener(completion, { id: negotiatedTc })
+		expect(h.browserApi.bookmarks.update).toHaveBeenCalledTimes(updateCount)
+		expect(h.browserApi.tabs.create).not.toHaveBeenCalled()
+		expect(h.browserApi.tabs.remove).not.toHaveBeenCalled()
+	})
+
+	// WHY: CLAIM(cooperation-single-owner); temporary intent must use the negotiated route, never legacy effectful fallback.
+	// catches: calling legacy createTabInTempContainer before TC receives a proposal, including ACK-loss duplicate creation.
+	it('returns temporary intent without sending legacy create or orphan queries', async () => {
+		const h = await cooperativeHarness(TEMP_CONTAINER_SENTINEL)
+		await h.beforeNavigateListeners[0]!({ tabId: 1, frameId: 0, url: h.encoded })
+		expect(await callbackFor(h)(resolution(), { id: negotiatedTc })).toEqual({
+			version: 1, action: 'route', url: 'https://example.com/article#section', cookieStoreId: 'temporary',
+		})
+		const methods = vi.mocked(h.browserApi.runtime.sendMessage).mock.calls.map(call => call[1]?.method)
+		expect(methods).not.toContain('createTabInTempContainer')
+		expect(methods).not.toContain('isTempContainer')
+		expect(h.browserApi.tabs.query).not.toHaveBeenCalled()
+	})
+
+	// WHY: CLAIM(cooperation-no-scan); a newly opened unrelated ephemeral tab is never CM-owned cleanup material.
+	// catches: retaining the six 150ms cleanup polls on the approved hotswap path.
+	it('keeps hotswap bookmark recoverable until completion, reverts it, and leaves unrelated temporary tabs alone', async () => {
+		vi.useFakeTimers()
+		const h = await cooperativeHarness()
+		await h.menuShownListeners[0]!({ contexts: ['bookmark'], bookmarkId: h.bookmark.id })
+		await flushMicrotasks(50)
+		const decoded = h.bookmark.url!
+		expect(decoded).toBe('https://example.com/article#section')
+		vi.mocked(h.browserApi.tabs.query).mockClear()
+		await h.menuHiddenListeners[0]!()
+		await flushMicrotasks(30)
+		await h.beforeNavigateListeners[0]!({ tabId: 1, frameId: 0, url: decoded })
+		const listener = callbackFor(h)
+		expect(await listener(resolution(decoded), { id: negotiatedTc })).toEqual({
+			version: 1, action: 'route', url: decoded, cookieStoreId: 'firefox-container-2',
+		})
+		await listener(completion, { id: negotiatedTc })
+		await vi.advanceTimersByTimeAsync(2000)
+		expect(parseBookmarkUrl(h.bookmark.url!)).toEqual(expect.objectContaining({ url: decoded, containerIndex: 0 }))
+		expect(h.browserApi.tabs.query).not.toHaveBeenCalled()
+		expect(h.browserApi.tabs.remove).not.toHaveBeenCalled()
+		expect(h.browserApi.tabs.create).not.toHaveBeenCalled()
+	})
+
+	// WHY: CLAIM(cooperation-legacy); old TC and denied callers must keep working without an accidental permanent suppression.
+	// catches: treating management.get success or any truthy capability object as approval.
+	it('uses existing activation when negotiation is unsupported or explicitly denied', async () => {
+		vi.useFakeTimers()
+		for (const capabilities of [false, { version: 1, approved: false }, { version: 99, approved: true }]) {
+			const h = await cooperativeHarness('firefox-container-2', capabilities)
+			await runStandardNavigationSequence(h, h.encoded)
+			await vi.advanceTimersByTimeAsync(1000)
+			expect(h.browserApi.tabs.create).toHaveBeenCalledTimes(1)
+			expect(h.browserApi.tabs.create).toHaveBeenCalledWith(expect.objectContaining({
+				url: 'https://example.com/article#section', cookieStoreId: 'firefox-container-2',
+			}))
+			expect(h.browserApi.tabs.remove).toHaveBeenCalledWith(1)
+		}
 	})
 })
