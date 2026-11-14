@@ -25,7 +25,7 @@ type TabActivatedListener = (activeInfo: { tabId: number }) => void | Promise<vo
 type TabCreatedListener = (tab: Tab) => void | Promise<void>
 type WindowCreatedListener = (window: Window) => void | Promise<void>
 type BeforeNavigateListener = (details: { tabId: number; url: string; frameId: number }) => void | Promise<void>
-type BeforeRequestListener = (details: { requestId: string; tabId: number; url: string; type: string }) => { cancel?: boolean } | void
+type BeforeRequestListener = (details: { requestId: string; tabId: number; url: string; type: string }) => { cancel?: boolean } | void | Promise<{ cancel?: boolean } | void>
 
 interface RuntimeHarness {
 	browserApi: BrowserApi
@@ -530,6 +530,7 @@ async function cooperativeHarness(cookieStoreId = 'firefox-container-2', tcCapab
 	})
 	await flushMicrotasks(80)
 	vi.mocked(harness.browserApi.tabs.query).mockClear()
+	vi.mocked(harness.browserApi.runtime.sendMessage).mockClear()
 	return { ...harness, encoded }
 }
 
@@ -611,7 +612,7 @@ describe('ContainMarksRuntime approved TC cooperation', () => {
 		expect(await callbackFor(h)(resolution(), { id: negotiatedTc })).toEqual({
 			version: 1, action: 'route', url: 'https://example.com/article#section', cookieStoreId: 'temporary',
 		})
-		const methods = vi.mocked(h.browserApi.runtime.sendMessage).mock.calls.map(call => call[1]?.method)
+		const methods = vi.mocked(h.browserApi.runtime.sendMessage).mock.calls.map(call => (call as unknown as [unknown, { method?: string }?])[1]?.method)
 		expect(methods).not.toContain('createTabInTempContainer')
 		expect(methods).not.toContain('isTempContainer')
 		expect(h.browserApi.tabs.query).not.toHaveBeenCalled()
@@ -657,4 +658,15 @@ describe('ContainMarksRuntime approved TC cooperation', () => {
 			expect(h.browserApi.tabs.remove).toHaveBeenCalledWith(1)
 		}
 	})
+	// WHY: CLAIM(cooperation-single-owner); UI updates survive HTTP routing ownership.
+	it('syncs the page action on a cooperative HTTP load', async () => {
+		const h = await cooperativeHarness()
+		const popup = vi.mocked(h.browserApi.pageAction.setPopup)
+		popup.mockClear()
+		const listener = vi.mocked(h.browserApi.tabs.onUpdated.addListener).mock.calls[0]![0]
+		await listener(1, { status: 'complete' }, { id: 1, index: 0, url: 'https://example.com/article' })
+		expect(popup).toHaveBeenCalled()
+		expect(h.browserApi.tabs.create).not.toHaveBeenCalled()
+	})
+
 })

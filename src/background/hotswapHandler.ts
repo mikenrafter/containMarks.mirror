@@ -99,6 +99,8 @@ export interface HotswapHandlerDeps {
  * registered directly as browser event listeners without rebinding.
  */
 export interface HotswapHandler {
+	resolve(url: string): Promise<import('./standardHandler').CooperativeRoute | null>
+	complete(url: string, bookmarkId: string): Promise<void>
 	// --- State exposed to other modules ---
 
 	/** Read-only view of decoded URLs awaiting new-tab interception during hotswap. */
@@ -189,7 +191,7 @@ export interface HotswapHandler {
 	 * Captures `preHotswapTabIds`, populates the redirect map for any hotswap records
 	 * that weren't already consumed, and schedules revert timers.
 	 */
-	readonly handleMenuHidden: () => Promise<void>
+	readonly handleMenuHidden: (cooperative?: boolean) => Promise<void>
 
 	/**
 	 * Called when a bookmark's URL or title changes.
@@ -308,6 +310,27 @@ export class HotswapHandlerImpl implements HotswapHandler {
 		}
 
 		return 'pass'
+	}
+
+	async resolve(url: string): Promise<import('./standardHandler').CooperativeRoute | null> {
+		const info = this._hotswapRedirectMap.get(url)
+		if (!info) return null
+		const settings = await this.deps.settings()
+		const store = this.deps.mappingStore(settings)
+		await store.initialize()
+		const mapping = store.getByIndex(info.containerIndex)
+		if (!mapping) return null
+		const container = mapping.cookieStoreId === TEMP_CONTAINER_SENTINEL ? null : await this.deps.getContainer(mapping)
+		if (mapping.cookieStoreId !== TEMP_CONTAINER_SENTINEL && !container) return null
+		return { version: 1, action: 'route', url,
+			cookieStoreId: mapping.cookieStoreId === TEMP_CONTAINER_SENTINEL ? 'temporary' : container!.cookieStoreId }
+	}
+
+	async complete(url: string, bookmarkId: string): Promise<void> {
+		const info = this._hotswapRedirectMap.get(url)
+		if (info?.bookmarkId === bookmarkId) this._hotswapRedirectMap.delete(url)
+		const record = this.hotswapRecords.get(bookmarkId)
+		if (record) { this.cancelHotswapTimer(bookmarkId); await this.revertHotswap(bookmarkId, record) }
 	}
 
 	async activate(url: string, tab: Tab, preTabIds?: ReadonlySet<number | undefined> | null): Promise<void> {
@@ -433,11 +456,11 @@ export class HotswapHandlerImpl implements HotswapHandler {
 		}
 	}
 
-	readonly handleMenuHidden = async (): Promise<void> => {
+	readonly handleMenuHidden = async (cooperative = false): Promise<void> => {
 		// Capture tab snapshot NOW — before TC can create orphan tabs in response to
 		// the user's next action (Open, Open in New Tab, Open in New Window).
 		// TEC uses this to distinguish pre-existing tabs from TC-created orphans.
-		const allTabs = await this.deps.browserApi.tabs.query({})
+		const allTabs = cooperative ? [] : await this.deps.browserApi.tabs.query({})
 		this._preHotswapTabIds = new Set(allTabs.map(t => t.id))
 
 		for (const [bookmarkId, record] of this.hotswapRecords) {

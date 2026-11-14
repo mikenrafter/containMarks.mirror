@@ -240,7 +240,7 @@ export interface BlockingResponse {
 export interface WebRequestApi {
 	onBeforeRequest: {
 		addListener(
-			listener: (details: WebRequestBeforeRequestDetails) => BlockingResponse | void,
+			listener: (details: WebRequestBeforeRequestDetails) => BlockingResponse | void | Promise<BlockingResponse | void>,
 			filter: { urls: string[]; types?: string[] },
 			extraInfoSpec?: string[]
 		): void
@@ -264,6 +264,9 @@ export interface ManagementApi {
  * targets a specific extension by ID — used to invoke the TC+ API.
  */
 export interface RuntimeApi {
+	onMessageExternal?: {
+		addListener(listener: (message: unknown, sender: { id?: string }) => Promise<unknown> | void): void
+	}
 	sendMessage(extensionId: string, message: Record<string, unknown>): Promise<unknown>
 	/** Message to ContainMarks' own background page. */
 	sendMessage(message: Record<string, unknown>): Promise<unknown>

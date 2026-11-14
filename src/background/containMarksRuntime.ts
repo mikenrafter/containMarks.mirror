@@ -131,7 +131,7 @@ export interface ContainMarksRuntime {
 	/** Synchronous — detects hotswap/standard URLs, populates pendingCancellations. */
 	readonly handleBeforeNavigate: (details: WebNavigationBeforeNavigateDetails) => void
 	/** Synchronous blocking — cancels pending navigations, returns { cancel: true }. */
-	readonly handleBeforeRequest: (details: WebRequestBeforeRequestDetails) => BlockingResponse | void
+	readonly handleBeforeRequest: (details: WebRequestBeforeRequestDetails) => BlockingResponse | void | Promise<BlockingResponse | void>
 	/** Async fallback — handles navigations that webRequest didn't catch. */
 	readonly handleTabUpdated: (tabId: number, changeInfo: TabChangeInfo, tab: Tab) => Promise<void>
 	/** Page action sync on tab switch. */
@@ -173,6 +173,12 @@ export class ContainMarksRuntimeImpl implements ContainMarksRuntime {
 	 * the same encoded URL again — this set deduplicates.
 	 */
 	private readonly activatingUrls = new Set<string>()
+	private cooperationEpoch = 0
+	private cooperationApproved = false
+	private cooperationKnown = false
+	private readonly navigationIntents = new Map<number, { url: string; blocked: boolean; owned: boolean }>()
+	private readonly proposals = new Map<string, { tabId: number; url: string; bookmarkId: string | undefined; route: import('./standardHandler').CooperativeRoute }>()
+	private readonly resolving = new Map<string, Promise<unknown>>()
 
 	// --- Mapping stores ---
 
@@ -255,6 +261,73 @@ export class ContainMarksRuntimeImpl implements ContainMarksRuntime {
 		})
 	}
 
+	private async refreshCooperation(): Promise<boolean> {
+		const id = this._tcLayer.extensionId
+		if (!id) return false
+		const epoch = ++this.cooperationEpoch
+		let timer: ReturnType<typeof setTimeout> | undefined
+		try {
+			const result = await Promise.race([
+				this.browserApi.runtime.sendMessage(id, { method: 'getCooperationCapabilities', version: 1 }),
+				new Promise(resolve => { timer = setTimeout(() => resolve(null), 500) }),
+			]) as { version?: number; approved?: boolean } | null
+			if (epoch !== this.cooperationEpoch) return this.cooperationApproved
+			this.cooperationApproved = result?.version === 1 && result.approved === true
+			this.cooperationKnown ||= this.cooperationApproved
+		} catch { if (epoch === this.cooperationEpoch) this.cooperationApproved = false }
+		finally { clearTimeout(timer) }
+		return this.cooperationApproved
+	}
+
+	private cooperationFailure(tabId: number): void {
+		this.logger.log('Container routing canceled: approval could not be confirmed. Navigate again to use legacy routing.')
+		void this.browserApi.pageAction.setTitle({ tabId, title: 'Container routing canceled: approval could not be confirmed. Navigate again.' })
+		void this.browserApi.pageAction.show(tabId)
+	}
+
+	private readonly handleCooperationMessage = (value: unknown, sender: { id?: string }): Promise<unknown> | void => {
+		if (!sender.id || sender.id !== this._tcLayer.extensionId) return
+		const message = value as any
+		if (!message || message.version !== 1) return
+		if (message.method === 'cooperationStateChanged') {
+			++this.cooperationEpoch
+			if (message.approved === false) this.cooperationApproved = false
+			return this.refreshCooperation()
+		}
+		if (!this.cooperationKnown) return
+		if (message.method === 'cooperativeNavigationCompleted') {
+			const proposal = this.proposals.get(message.requestId)
+			if (!proposal || proposal.tabId !== message.tabId || !Number.isInteger(message.destinationTabId)) return
+			this.proposals.delete(message.requestId)
+			return proposal.bookmarkId
+				? this._hotswapHandler.complete(proposal.url, proposal.bookmarkId)
+				: this._standardHandler.complete(proposal.url)
+		}
+		if (message.method !== 'resolveCooperativeNavigation') return
+		const request = message.request
+		const pass = { version: 1, action: 'pass' }
+		if (!request || !Number.isInteger(request.tabId) || request.tabId < 0 || typeof request.requestId !== 'string' ||
+			!request.requestId || typeof request.url !== 'string' || !/^https?:/.test(request.url)) return Promise.resolve(pass)
+		const existing = this.proposals.get(request.requestId)
+		if (existing) return Promise.resolve(existing.tabId === request.tabId ? existing.route : pass)
+		const pending = this.resolving.get(request.requestId)
+		if (pending) return pending
+		const operation = (async () => {
+			const cached = this.navigationIntents.get(request.tabId)
+			if (cached && cached.url.split('#')[0] !== request.url.split('#')[0]) return pass
+			const url = cached && cached.url.split('#')[0] === request.url.split('#')[0] ? cached.url : request.url
+			const bookmarkId = this._hotswapHandler.hotswapRedirectMap.get(url)?.bookmarkId
+			const route = await this._hotswapHandler.resolve(url) ?? await this._standardHandler.resolve(url)
+			if (!route) return pass
+			if (cached && this.navigationIntents.get(request.tabId) !== cached) return pass
+			this.proposals.set(request.requestId, { tabId: request.tabId, url, bookmarkId, route })
+			setTimeout(() => this.proposals.delete(request.requestId), 300000)
+			return route
+		})().finally(() => this.resolving.delete(request.requestId))
+		this.resolving.set(request.requestId, operation)
+		return operation
+	}
+
 	// --- Module accessors ---
 
 	get hotswapHandler(): HotswapHandler { return this._hotswapHandler }
@@ -316,6 +389,7 @@ export class ContainMarksRuntimeImpl implements ContainMarksRuntime {
 
 		// TC detection (TempContainerLayer is the canonical owner)
 		await this._tcLayer.initialize()
+		await this.refreshCooperation()
 
 		// Hotswap crash recovery (re-encodes bookmarks left decoded)
 		await this._hotswapHandler.initialize()
@@ -351,6 +425,22 @@ export class ContainMarksRuntimeImpl implements ContainMarksRuntime {
 	 */
 	readonly handleBeforeNavigate = (details: WebNavigationBeforeNavigateDetails): void => {
 		if (details.frameId !== 0) return
+		if (/^https?:/.test(details.url)) {
+			for (const [id, proposal] of this.proposals) {
+				if (proposal.tabId === details.tabId) this.proposals.delete(id)
+			}
+			const intent = { url: details.url, blocked: false, owned: this.cooperationApproved }
+			this.navigationIntents.set(details.tabId, intent)
+			if (this.cooperationApproved) {
+				void this.refreshCooperation().then(approved => {
+					if (!approved && this.navigationIntents.get(details.tabId) === intent) {
+						intent.blocked = true
+						this.cooperationFailure(details.tabId)
+					}
+				})
+				return
+			}
+		}
 
 		const hotswapResult = this._hotswapHandler.detect(details.url)
 		// Only check standard if hotswap didn't claim or lock the URL
@@ -380,8 +470,18 @@ export class ContainMarksRuntimeImpl implements ContainMarksRuntime {
 	 * Sets claimedTabIds so handleTabUpdated won't double-process this navigation.
 	 * The setTimeout(0) cleanup gives handleTabUpdated one event-loop turn to check.
 	 */
-	readonly handleBeforeRequest = (details: WebRequestBeforeRequestDetails): BlockingResponse | void => {
+	readonly handleBeforeRequest = (details: WebRequestBeforeRequestDetails): BlockingResponse | void | Promise<BlockingResponse | void> => {
 		if (details.type !== 'main_frame') return
+		if (/^https?:/.test(details.url) && (this.cooperationApproved || this.navigationIntents.get(details.tabId)?.owned)) {
+			const intent = this.navigationIntents.get(details.tabId)
+			return this.refreshCooperation().then(approved => {
+				if (!approved || intent?.blocked) {
+					if (intent) intent.blocked = true
+					this.cooperationFailure(details.tabId)
+					return { cancel: true }
+				}
+			})
+		}
 
 		const pending = this.pendingCancellations.get(details.tabId)
 		if (!pending) return
@@ -509,6 +609,8 @@ export class ContainMarksRuntimeImpl implements ContainMarksRuntime {
 			}
 		}
 
+		if (/^https?:/.test(changeInfo.url ?? tab.url ?? '') &&
+			(this.cooperationApproved || this.navigationIntents.get(tabId)?.owned)) return
 		if (tabId === this.browserApi.tabs.TAB_ID_NONE) return
 
 		// webRequest already cancelled this navigation — redirect is in flight
@@ -571,6 +673,7 @@ export class ContainMarksRuntimeImpl implements ContainMarksRuntime {
 	 */
 	readonly handleTabCreated = async (tab: Tab): Promise<void> => {
 		if (!tab.url || !tab.id) return
+		if (/^https?:/.test(tab.url) && (this.cooperationApproved || this.navigationIntents.get(tab.id)?.owned)) return
 
 		const hotResult = this._hotswapHandler.detect(tab.url)
 		if (hotResult === 'claim') {
@@ -598,6 +701,7 @@ export class ContainMarksRuntimeImpl implements ContainMarksRuntime {
 
 			for (const tab of tabs) {
 				if (!tab.url || !tab.id) continue
+				if (/^https?:/.test(tab.url) && (this.cooperationApproved || this.navigationIntents.get(tab.id)?.owned)) continue
 
 				const hotResult = this._hotswapHandler.detect(tab.url)
 				if (hotResult === 'claim') {
@@ -620,6 +724,7 @@ export class ContainMarksRuntimeImpl implements ContainMarksRuntime {
 
 	/** Wires all browser event listeners to the appropriate module handlers. */
 	private registerListeners(): void {
+		this.browserApi.runtime.onMessageExternal?.addListener(this.handleCooperationMessage)
 		// Menu events — HotswapHandler owns the decode/revert lifecycle,
 		// BAM owns menu click handling and menu item construction.
 		this.browserApi.menus.onClicked.addListener((info) => {
@@ -634,7 +739,7 @@ export class ContainMarksRuntimeImpl implements ContainMarksRuntime {
 				await this._bam.createMenuItems(bookmark)
 			})
 		})
-		this.browserApi.menus.onHidden.addListener(this._hotswapHandler.handleMenuHidden)
+		this.browserApi.menus.onHidden.addListener(() => this._hotswapHandler.handleMenuHidden(this.cooperationApproved))
 
 		// Navigation pipeline — sync interception → async activation
 		this.browserApi.webNavigation.onBeforeNavigate.addListener(this.handleBeforeNavigate)

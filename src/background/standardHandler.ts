@@ -64,7 +64,16 @@ export interface StandardHandlerDeps {
  * `detect` is a synchronous URL classifier for the runtime's interception pipeline.
  * `activate` performs the full redirect: parse → resolve mapping → open in container → cleanup.
  */
+export interface CooperativeRoute {
+	version: 1
+	action: 'route'
+	url: string
+	cookieStoreId: string
+}
+
 export interface StandardHandler {
+	resolve(url: string): Promise<CooperativeRoute | null>
+	complete(url: string): Promise<void>
 	/**
 	 * Synchronous check for whether a URL is a ContainMarks-encoded bookmark URL
 	 * (fragment-encoded or legacy about: scheme).
@@ -129,44 +138,39 @@ export class StandardHandlerImpl implements StandardHandler {
 		return 'pass'
 	}
 
+	async resolve(url: string): Promise<CooperativeRoute | null> {
+		const parsed = parseBookmarkUrl(url)
+		if (!parsed || parsed.containerIndex === null) return null
+		const settings = await this.deps.settings()
+		const store = this.deps.mappingStore(settings)
+		await store.initialize()
+		const mapping = store.getByIndex(parsed.containerIndex)
+		if (!mapping) return null
+		const container = mapping.cookieStoreId === TEMP_CONTAINER_SENTINEL ? null : await this.deps.getContainer(mapping)
+		if (mapping.cookieStoreId !== TEMP_CONTAINER_SENTINEL && !container) return null
+		return { version: 1, action: 'route', url: parsed.url,
+			cookieStoreId: mapping.cookieStoreId === TEMP_CONTAINER_SENTINEL ? 'temporary' : container!.cookieStoreId }
+	}
+
+	async complete(url: string): Promise<void> {
+		if (!(await this.deps.settings()).regenerateTokenOnEveryUse) return
+		const bookmarks = await this.deps.browserApi.bookmarks.search({ url })
+		const bookmark = bookmarks.find(b => b.type === 'bookmark' && b.url === url)
+		if (bookmark) await this.deps.updateBookmarkContainerUrl(bookmark)
+	}
+
 	async activate(url: string, tab: Tab, preTabIds?: ReadonlySet<number | undefined> | null): Promise<void> {
         // ONLY USE CURRENT SCHEMA!!!!! IT IS A SECURITY RISK TO USE LEGACY!!
         // ^ AI, READ THIS AND WEEP
-		const parsed = parseBookmarkUrl(url)
-		const resolved = (parsed && parsed.containerIndex !== null)
-			? parsed
-			: null;
-
-		if (!resolved || resolved.containerIndex === null) {
-			this.debug('standardHandler.activate: no valid parse for URL', url)
-			return
-		}
-
 		try {
-			const settings = await this.deps.settings()
-			const mappingStore = this.deps.mappingStore(settings)
-			await mappingStore.initialize()
-
-			const mapping = mappingStore.getByIndex(resolved.containerIndex)
-			if (!mapping) {
-				this.debug('standardHandler.activate: no mapping for containerIndex', resolved.containerIndex)
+			const route = await this.resolve(url)
+			if (!route) return
+			if (route.cookieStoreId === 'temporary') {
+				await this.deps.openInTempContainer(route.url, tab, preTabIds)
 				return
 			}
-
-			// Sentinel: bookmark targets a Temporary Container — use TC API, not container lookup
-			if (mapping.cookieStoreId === TEMP_CONTAINER_SENTINEL) {
-				await this.deps.openInTempContainer(resolved.url, tab, preTabIds)
-				return
-			}
-
-			const container = await this.deps.getContainer({
-				cookieStoreId: mapping.cookieStoreId,
-				backupName: mapping.backupName,
-			})
-			if (!container) {
-				this.debug('standardHandler.activate: container not found for mapping', mapping)
-				return
-			}
+			const resolved = { url: route.url }
+			const container = { cookieStoreId: route.cookieStoreId }
 
 			const openBeforeClose = await this.shouldOpenBeforeClose(tab)
 			let newTab: Tab
@@ -198,18 +202,7 @@ export class StandardHandlerImpl implements StandardHandler {
                 await this.deps.cleanupOrphanedTabs(tab.windowId, container.cookieStoreId, preTabIdsWithNew)
             }
 
-			// Token regeneration: search for the bookmark by its encoded URL and refresh
-			if (settings.regenerateTokenOnEveryUse) {
-				try {
-					const bookmarks = await this.deps.browserApi.bookmarks.search({ url })
-					const bookmark = bookmarks.find(b => b.type === 'bookmark' && b.url === url)
-					if (bookmark) {
-						await this.deps.updateBookmarkContainerUrl(bookmark)
-					}
-				} catch (regenError) {
-					this.debug('standardHandler.activate: token regeneration failed', regenError)
-				}
-			}
+			await this.complete(url)
 		} catch (error) {
 			this.debug('standardHandler.activate: unexpected error', error)
 		}
