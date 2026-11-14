@@ -70,7 +70,7 @@ function createMockBrowserApi(): BrowserApi {
 		webNavigation: { onBeforeNavigate: { addListener: vi.fn() } },
 		webRequest: { onBeforeRequest: { addListener: vi.fn() } },
 		management: { get: vi.fn().mockRejectedValue(new Error('not found')) },
-		runtime: { sendMessage: vi.fn().mockResolvedValue(undefined), onMessage: { addListener: vi.fn() } },
+		runtime: { getURL: (path: string) => path, sendMessage: vi.fn().mockResolvedValue(undefined), onMessage: { addListener: vi.fn() } },
 		storage: {
 			onChanged: { addListener: vi.fn() },
 			local: {

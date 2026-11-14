@@ -139,6 +139,7 @@ function createMappingStoreBrowserMock(options?: {
 			get: vi.fn().mockRejectedValue(new Error('Extension not found'))
 		},
 		runtime: {
+			getURL: (path: string) => path,
 			onMessage: { addListener: vi.fn() },
 			sendMessage: vi.fn().mockResolvedValue(undefined)
 		},

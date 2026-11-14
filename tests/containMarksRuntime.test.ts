@@ -36,12 +36,17 @@ interface RuntimeHarness {
 	beforeNavigateListeners: BeforeNavigateListener[]
 	beforeRequestListeners: BeforeRequestListener[]
 	externalListeners: Array<(message: unknown, sender: { id?: string }) => unknown>
+	storageState: Record<string, unknown>
+	managementListeners: { installed: Array<(info: { id: string }) => unknown>; enabled: Array<(info: { id: string }) => unknown> }
+	installTc(capabilities: unknown): void
 }
 
 interface RuntimeHarnessOptions {
 	tcCapabilities?: unknown
 	localMappings?: Array<{ firstSeenIndex: number; cookieStoreId: string; backupName: string }>
 	tabsInWindow?: Tab[]
+	/** Reuse a previous harness's local storage to model a browser restart. */
+	storageState?: Record<string, unknown> | undefined
 }
 
 function flushMicrotasks(rounds = 4): Promise<void> {
@@ -94,11 +99,13 @@ function createRuntimeHarness(initialBookmarkUrl: string, options: RuntimeHarnes
 		{ cookieStoreId: 'firefox-container-2', name: 'Work', icon: 'briefcase' as const, color: 'orange' as const },
 	]
 
-	const storageState: Record<string, unknown> = {
+	const storageState: Record<string, unknown> = options.storageState ?? {
 		[SETTINGS_STORAGE_KEY]: defaultSettings(),
 		[HOTSWAP_STORAGE_KEY]: {},
 		[LOCAL_MAPPING_STORAGE_KEY]: options.localMappings ?? [],
 	}
+	let tcCapabilities = options.tcCapabilities
+	const managementListeners: RuntimeHarness['managementListeners'] = { installed: [], enabled: [] }
 	const tabsInWindow = options.tabsInWindow ?? [{ id: 1, index: 0, url: 'https://example.com', windowId: 1 }]
 
 	let createdCounter = 0
@@ -270,10 +277,16 @@ function createRuntimeHarness(initialBookmarkUrl: string, options: RuntimeHarnes
 			},
 		},
 		management: {
-			get: options.tcCapabilities === undefined ? vi.fn().mockRejectedValue(new Error('Not installed')) : vi.fn().mockResolvedValue({ enabled: true, name: 'TC+' }),
+			get: vi.fn(async (id: string) => {
+				if (tcCapabilities === undefined) throw new Error('Not installed')
+				return { id, enabled: true, name: 'TC+', type: 'extension' }
+			}),
+			onInstalled: { addListener: vi.fn((listener: (info: { id: string }) => unknown) => managementListeners.installed.push(listener)) },
+			onEnabled: { addListener: vi.fn((listener: (info: { id: string }) => unknown) => managementListeners.enabled.push(listener)) },
 		},
 		runtime: {
 			onMessage: { addListener: vi.fn() },
+			getURL: (path: string) => `moz-extension://containmarks/${path}`,
 			sendMessage: vi.fn().mockResolvedValue(false),
 		},
 		storage: {
@@ -301,14 +314,13 @@ function createRuntimeHarness(initialBookmarkUrl: string, options: RuntimeHarnes
 	}
 
 	Object.assign(browserApi.runtime, { onMessageExternal: { addListener: vi.fn((listener: RuntimeHarness['externalListeners'][number]) => externalListeners.push(listener)) } })
-	if (options.tcCapabilities !== undefined) {
-		vi.mocked(browserApi.runtime.sendMessage).mockImplementation(async (_id: string | Record<string, unknown>, message?: Record<string, unknown>) => {
-			if (message?.method === 'getCooperationCapabilities') return options.tcCapabilities
-			if (message?.method === 'isTempContainer') return message.cookieStoreId === 'firefox-container-99'
-			if (message?.method === 'createTabInTempContainer') return { id: 900, cookieStoreId: 'firefox-container-99' }
-			return false
-		})
-	}
+	vi.mocked(browserApi.runtime.sendMessage).mockImplementation(async (_id: string | Record<string, unknown>, message?: Record<string, unknown>) => {
+		if (tcCapabilities === undefined) return false
+		if (message?.method === 'getCooperationCapabilities') return tcCapabilities
+		if (message?.method === 'isTempContainer') return message.cookieStoreId === 'firefox-container-99'
+		if (message?.method === 'createTabInTempContainer') return { id: 900, cookieStoreId: 'firefox-container-99' }
+		return false
+	})
 
 	const runtime = new ContainMarksRuntimeImpl({
 		browserApi,
@@ -334,6 +346,9 @@ function createRuntimeHarness(initialBookmarkUrl: string, options: RuntimeHarnes
 		beforeNavigateListeners,
 		beforeRequestListeners,
 		externalListeners,
+		storageState,
+		managementListeners,
+		installTc: (capabilities) => { tcCapabilities = capabilities },
 	}
 }
 
@@ -651,7 +666,8 @@ describe('ContainMarksRuntime approved TC cooperation', () => {
 			const h = await cooperativeHarness('firefox-container-2', capabilities)
 			await runStandardNavigationSequence(h, h.encoded)
 			await vi.advanceTimersByTimeAsync(1000)
-			expect(h.browserApi.tabs.create).toHaveBeenCalledTimes(1)
+			// An explicit denial is still offered once at startup; routing itself must not create more than the legacy tab.
+			expect(vi.mocked(h.browserApi.tabs.create).mock.calls.filter(([d]) => !d.url?.includes('offer/offer.html'))).toHaveLength(1)
 			expect(h.browserApi.tabs.create).toHaveBeenCalledWith(expect.objectContaining({
 				url: 'https://example.com/article#section', cookieStoreId: 'firefox-container-2',
 			}))
@@ -669,4 +685,99 @@ describe('ContainMarksRuntime approved TC cooperation', () => {
 		expect(h.browserApi.tabs.create).not.toHaveBeenCalled()
 	})
 
+})
+
+const offerKey = 'containMarks.cooperationOffers'
+const offerPage = 'moz-extension://containmarks/offer/offer.html?tc=' + encodeURIComponent(negotiatedTc)
+const offerTabs = (h: RuntimeHarness) => vi.mocked(h.browserApi.tabs.create).mock.calls.filter(([d]) => d.url?.includes('offer/offer.html'))
+const settle = () => vi.advanceTimersByTimeAsync(5000)
+
+describe('ContainMarksRuntime automatic cooperation offer', () => {
+	afterEach(() => { vi.useRealTimers() })
+	const start = async (capabilities: unknown, storageState?: Record<string, unknown>) => {
+		const h = createRuntimeHarness('https://example.com/', { tcCapabilities: capabilities, storageState })
+		await settle()
+		return h
+	}
+
+	// WHY: CLAIM(cooperation-offer); a compatible unapproved TC is offered once, at startup, without any settings visit.
+	// catches: offering only from settings, offering before the version-1 reply, offering again after restart.
+	it('offers once, records the decision before opening, and stays quiet after restart', async () => {
+		vi.useFakeTimers()
+		const first = createRuntimeHarness('https://example.com/', { tcCapabilities: { version: 1, approved: false } })
+		let recordedWhenOpened: unknown
+		vi.mocked(first.browserApi.tabs.create).mockImplementation(async () => {
+			recordedWhenOpened = first.storageState[offerKey]
+			return { id: 700, index: 1 }
+		})
+		await settle()
+		expect(offerTabs(first).map(([d]) => d.url)).toEqual([offerPage])
+		expect(recordedWhenOpened).toMatchObject({ [negotiatedTc]: { state: 'offered' } })
+		const restarted = await start({ version: 1, approved: false }, first.storageState)
+		expect(offerTabs(restarted)).toHaveLength(0)
+	})
+
+	// WHY: CLAIM(cooperation-offer); no offer for TC that cannot or need not be asked, and unapproved checks stay pure.
+	// catches: offering to old TC, to already-approved CM, or recording state for them.
+	it('does not offer for absent, legacy, unknown-version or approved TC', async () => {
+		vi.useFakeTimers()
+		for (const capabilities of [undefined, false, { version: 99, approved: false }, { version: 1, approved: true }]) {
+			const h = await start(capabilities)
+			expect(offerTabs(h), JSON.stringify(capabilities)).toHaveLength(0)
+			const record = (h.storageState[offerKey] as Record<string, { state: string }> | undefined)?.[negotiatedTc]
+			const alreadyApproved = (capabilities as { version?: number; approved?: boolean } | false | undefined) !== undefined && capabilities !== false &&
+				(capabilities as { version?: number }).version === 1 && (capabilities as { approved?: boolean }).approved === true
+			expect(record?.state, JSON.stringify(capabilities)).toBe(alreadyApproved ? 'approved' : undefined)
+		}
+	})
+
+	// WHY: CLAIM(cooperation-offer); a later revoke must not turn into an automatic nag.
+	// catches: treating approval as no history, so a revoked CM is offered at next startup.
+	it('does not offer after a previously approved CM is revoked', async () => {
+		vi.useFakeTimers()
+		const approvedRun = await start({ version: 1, approved: true })
+		const revoked = await start({ version: 1, approved: false }, approvedRun.storageState)
+		expect(offerTabs(revoked)).toHaveLength(0)
+	})
+
+	// WHY: CLAIM(cooperation-offer); failure to open the offer must not permanently suppress a retry.
+	it('rolls back the decision when the offer cannot open', async () => {
+		vi.useFakeTimers()
+		const failing = createRuntimeHarness('https://example.com/', { tcCapabilities: { version: 1, approved: false } })
+		vi.mocked(failing.browserApi.tabs.create).mockRejectedValue(new Error('no window'))
+		await settle()
+		expect(failing.storageState[offerKey] ?? {}).toEqual({})
+		const retry = await start({ version: 1, approved: false }, failing.storageState)
+		expect(offerTabs(retry)).toHaveLength(1)
+	})
+
+	// WHY: CLAIM(cooperation-offer); TC installed or enabled after CM starts is offered once, without rerunning startup.
+	// catches: ignoring unrelated extensions, duplicate management events, rerunning migrations.
+	it('offers when TC is installed after startup, once, and ignores other extensions', async () => {
+		vi.useFakeTimers()
+		const h = await start(undefined)
+		const searches = vi.mocked(h.browserApi.bookmarks.search).mock.calls.length
+		h.installTc({ version: 1, approved: false })
+		const { installed, enabled } = h.managementListeners
+		expect(installed).toHaveLength(1)
+		expect(enabled).toHaveLength(1)
+		installed[0]!({ id: 'other@example.test' })
+		await settle()
+		expect(offerTabs(h)).toHaveLength(0)
+		installed[0]!({ id: negotiatedTc })
+		enabled[0]!({ id: negotiatedTc })
+		await settle()
+		expect(offerTabs(h)).toHaveLength(1)
+		expect(vi.mocked(h.browserApi.bookmarks.search).mock.calls.length).toBe(searches)
+	})
+
+	// WHY: CLAIM(cooperation-offer); a freshly loaded TC may answer after the first probe.
+	it('waits briefly for a TC that is not answering yet', async () => {
+		vi.useFakeTimers()
+		const h = createRuntimeHarness('https://example.com/', { tcCapabilities: false })
+		await vi.advanceTimersByTimeAsync(600)
+		h.installTc({ version: 1, approved: false })
+		await settle()
+		expect(offerTabs(h)).toHaveLength(1)
+	})
 })

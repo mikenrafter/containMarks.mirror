@@ -79,6 +79,7 @@ function createMockBrowserApi(): BrowserApi {
 			get: vi.fn().mockRejectedValue(new Error('not found')),
 		},
 		runtime: {
+			getURL: (path: string) => path,
 			onMessage: { addListener: vi.fn() },
 			sendMessage: vi.fn().mockResolvedValue(undefined),
 		},

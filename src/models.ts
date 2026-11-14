@@ -172,7 +172,7 @@ export interface ContextualIdentitiesApi {
 
 export interface TabsApi {
 	TAB_ID_NONE: number
-	create(details: Partial<{ cookieStoreId: string; url: string; index: number }>): Promise<Tab>
+	create(details: Partial<{ cookieStoreId: string; url: string; index: number; active: boolean }>): Promise<Tab>
 	remove(tabId: number): Promise<void>
 	get(tabId: number): Promise<Tab>
 	update(tabId: number, updateProperties: { url?: string, loadReplace?: boolean }): Promise<Tab>
@@ -257,6 +257,8 @@ export interface ExtensionInfo {
 /** Subset of browser.management used to detect companion extensions (e.g., Temporary Containers Plus). */
 export interface ManagementApi {
 	get(extensionId: string): Promise<ExtensionInfo>
+	onInstalled?: { addListener(listener: (info: ExtensionInfo) => void): void }
+	onEnabled?: { addListener(listener: (info: ExtensionInfo) => void): void }
 }
 
 /**
@@ -267,6 +269,7 @@ export interface RuntimeApi {
 	onMessageExternal?: {
 		addListener(listener: (message: unknown, sender: { id?: string }) => Promise<unknown> | void): void
 	}
+	getURL(path: string): string
 	sendMessage(extensionId: string, message: Record<string, unknown>): Promise<unknown>
 	/** Message to ContainMarks' own background page. */
 	sendMessage(message: Record<string, unknown>): Promise<unknown>

@@ -61,6 +61,7 @@ import {
 	readLegacyReference,
 	readLegacyStorageKeys,
 } from '../urlCodec'
+import { forgetCooperationOffer, recordCooperationOffer } from '../preferences/cooperationOffer'
 import { SETTINGS_STORAGE_KEY, loadSettings, saveSettings } from '../preferences/settings'
 
 import { HotswapHandlerImpl } from './hotswapHandler'
@@ -78,6 +79,7 @@ import {
 	ENABLE_DEBUG_DEFAULT,
 	NO_CONTAINER,
 	TEMP_CONTAINER_SENTINEL,
+	TEMP_CONTAINERS_EXTENSION_IDS,
 } from '../constants'
 
 // Re-export constants and codec functions for external consumers (mirrors backgroundApp exports).
@@ -176,6 +178,9 @@ export class ContainMarksRuntimeImpl implements ContainMarksRuntime {
 	private cooperationEpoch = 0
 	private cooperationApproved = false
 	private cooperationKnown = false
+	/** TC answered getCooperationCapabilities with version 1 (so it can show the consent page). */
+	private cooperationSupported = false
+	private offering = false
 	private readonly navigationIntents = new Map<number, { url: string; blocked: boolean; owned: boolean }>()
 	private readonly proposals = new Map<string, { tabId: number; url: string; bookmarkId: string | undefined; route: import('./standardHandler').CooperativeRoute }>()
 	private readonly resolving = new Map<string, Promise<unknown>>()
@@ -272,11 +277,55 @@ export class ContainMarksRuntimeImpl implements ContainMarksRuntime {
 				new Promise(resolve => { timer = setTimeout(() => resolve(null), 500) }),
 			]) as { version?: number; approved?: boolean } | null
 			if (epoch !== this.cooperationEpoch) return this.cooperationApproved
+			this.cooperationSupported = result?.version === 1 && typeof result.approved === 'boolean'
 			this.cooperationApproved = result?.version === 1 && result.approved === true
 			this.cooperationKnown ||= this.cooperationApproved
 		} catch { if (epoch === this.cooperationEpoch) this.cooperationApproved = false }
 		finally { clearTimeout(timer) }
 		return this.cooperationApproved
+	}
+
+	/**
+	 * Offers the TC connection once per TC, automatically, when TC supports cooperation and has not
+	 * approved ContainMarks. The decision is recorded before the page opens so closing, declining or
+	 * restarting never re-offers; an opening failure is rolled back so a later start can retry.
+	 */
+	private async offerCooperation(): Promise<void> {
+		const id = this._tcLayer.extensionId
+		if (!id || this.offering) return
+		this.offering = true
+		try {
+			// TC may still be loading right after install or browser start.
+			for (let attempt = 0; !this.cooperationSupported && attempt < 3; attempt++) {
+				await new Promise(resolve => setTimeout(resolve, 1000))
+				await this.refreshCooperation()
+			}
+			if (!this.cooperationSupported) return
+			if (this.cooperationApproved) return void await recordCooperationOffer(this.browserApi, id, 'approved')
+			if (!(await recordCooperationOffer(this.browserApi, id, 'offered'))) return
+			try {
+				await this.browserApi.tabs.create({ url: this.browserApi.runtime.getURL(`offer/offer.html?tc=${encodeURIComponent(id)}`), active: true })
+			} catch (error) {
+				await forgetCooperationOffer(this.browserApi, id)
+				this.debug(error)
+			}
+		} finally { this.offering = false }
+	}
+
+	/** An approval seen once means a later revoke is the owner's decision, not a reason to offer again. */
+	private async rememberApproval(): Promise<void> {
+		const id = this._tcLayer.extensionId
+		if (id && this.cooperationApproved) await recordCooperationOffer(this.browserApi, id, 'approved')
+	}
+
+	/** TC installed or enabled after startup: reuse detection and the offer only, never the startup migrations. */
+	private readonly handleManagementChange = (info: { id: string }): void => {
+		if (!(TEMP_CONTAINERS_EXTENSION_IDS as readonly string[]).includes(info.id)) return
+		void (async () => {
+			await this._tcLayer.initialize()
+			await this.refreshCooperation()
+			await this.offerCooperation()
+		})().catch(error => this.debug(error))
 	}
 
 	private cooperationFailure(tabId: number): void {
@@ -292,7 +341,7 @@ export class ContainMarksRuntimeImpl implements ContainMarksRuntime {
 		if (message.method === 'cooperationStateChanged') {
 			++this.cooperationEpoch
 			if (message.approved === false) this.cooperationApproved = false
-			return this.refreshCooperation()
+			return this.refreshCooperation().then(async approved => { await this.rememberApproval(); return approved })
 		}
 		if (!this.cooperationKnown) return
 		if (message.method === 'cooperativeNavigationCompleted') {
@@ -390,6 +439,7 @@ export class ContainMarksRuntimeImpl implements ContainMarksRuntime {
 		// TC detection (TempContainerLayer is the canonical owner)
 		await this._tcLayer.initialize()
 		await this.refreshCooperation()
+		void this.offerCooperation().catch(error => this.debug(error))
 
 		// Hotswap crash recovery (re-encodes bookmarks left decoded)
 		await this._hotswapHandler.initialize()
@@ -725,6 +775,8 @@ export class ContainMarksRuntimeImpl implements ContainMarksRuntime {
 	/** Wires all browser event listeners to the appropriate module handlers. */
 	private registerListeners(): void {
 		this.browserApi.runtime.onMessageExternal?.addListener(this.handleCooperationMessage)
+		this.browserApi.management.onInstalled?.addListener(this.handleManagementChange)
+		this.browserApi.management.onEnabled?.addListener(this.handleManagementChange)
 		// Menu events — HotswapHandler owns the decode/revert lifecycle,
 		// BAM owns menu click handling and menu item construction.
 		this.browserApi.menus.onClicked.addListener((info) => {
