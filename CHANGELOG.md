@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.3
+
+### Fixed
+- Keep the address-bar icon visible in light and dark Firefox themes, including versions without the old automatic dark-mode filter. Thanks to Roy Orbitson for the report and compact SVG artwork in !5.
+
 ## 1.2.2
 
 ### Added
